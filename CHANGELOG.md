@@ -8,4 +8,4 @@
 - Document direct GitHub install steps, GeoIP setup, licensing and package-build limitations.
 - Bump OpenWrt package release to 7.
 
-This is a source-only pre-release. It does not include a prebuilt APK/IPK, and router-side compatibility testing is still required.
+This is a source-only pre-release on GitHub. No prebuilt APK/IPK is attached yet, and router-side compatibility testing is still required.
