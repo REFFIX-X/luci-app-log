@@ -9,4 +9,4 @@
 - Make the app's package name explicit for the OpenWrt feed scanner while keeping LuCI's standard file staging rules.
 - Publish SHA-256 checksums for release assets.
 
-The package name remains `luci-app-log-viewer`, so an existing installation is upgraded/replaced in place. Source validation passes; package artifacts are only published after the SDK build jobs succeed.
+The package name remains `luci-app-log-viewer`, so an existing installation is upgraded/replaced in place. Source validation passes; the release workflow publishes APK/IPK artifacts only after both SDK build jobs and checksum generation succeed.
