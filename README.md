@@ -13,94 +13,36 @@ A REFFIX-maintained fork of [gSpotx2f/luci-app-log](https://github.com/gSpotx2f/
 
 ## Installation
 
-The `v1.5.0-r7` pre-release is a **source overlay**, not a prebuilt APK/IPK package. The overlay method assumes the upstream `luci-app-log-viewer` package is already installed; it adds the Firewall Log page and helper scripts without replacing the original System Log / Kernel Log implementation. [View releases](https://github.com/REFFIX-X/luci-app-log/releases).
+### One-line installer (recommended)
 
-### Install on OpenWrt / GL.iNet Flint4
-
-Run the following commands on the router as root. Make a backup first, especially if you have customized the existing LuCI menu or ACL files.
-
-1. **Download the source from GitHub** (or use the Windows transfer option below):
-
-   ```sh
-   cd /tmp
-   uclient-fetch -O reffix-luci-app-log.tar.gz https://codeload.github.com/REFFIX-X/luci-app-log/tar.gz/refs/heads/master
-   tar -xzf reffix-luci-app-log.tar.gz
-   cd luci-app-log-master
-   ```
-
-   This fetches the latest committed source from the `master` branch. If `uclient-fetch` is unavailable, use `wget -O reffix-luci-app-log.tar.gz https://codeload.github.com/REFFIX-X/luci-app-log/tar.gz/refs/heads/master` instead.
-
-   **Windows PowerShell transfer alternative:** with the repository already cloned locally:
-
-   ```powershell
-   scp -r .\luci-app-log root@192.168.1.1:/tmp/
-   ssh root@192.168.1.1
-   cd /tmp/luci-app-log
-   ```
-
-   Replace the IP with the router's LAN address and adjust the local folder if needed.
-
-2. **Install the GeoIP database reader.**
-
-   OpenWrt 25.12 and newer versions using APK:
-   ```sh
-   apk update
-   apk add libmaxminddb
-   ```
-
-   OpenWrt 24.10 and older versions using opkg:
-   ```sh
-   opkg update
-   opkg install libmaxminddb
-   ```
-
-3. **Install the view and menu files.**
-
-   From the repo directory on the router:
-   ```sh
-   sh ./install.sh
-   ```
-
-4. **Download the GeoLite2 Country and ASN databases, then test the helper.**
-   ```sh
-   /usr/bin/flint4-geoip-update
-   /usr/bin/flint4-geoip --json 1.1.1.1
-   ```
-
-5. **Reload LuCI permissions and refresh the browser.**
-   ```sh
-   /etc/init.d/rpcd restart
-   ```
-
-   Then press **Ctrl+F5** in the browser and open **Status → Log Viewer → Firewall Log**.
-
-The installer keeps timestamped backups of the menu and ACL JSON files under `/root/reffix-log-viewer-backup-*`. Review those backups if you need to restore your previous configuration.
-
-### Remove the overlay
-
-From the repository directory on the router:
+On a supported Flint4 / aarch64 Cortex-A53 router, connect over SSH as root and run:
 
 ```sh
-sh ./uninstall.sh
-/etc/init.d/rpcd restart
+uclient-fetch -qO- https://raw.githubusercontent.com/REFFIX-X/luci-app-log/master/install-online.sh | sh
 ```
 
-The uninstall script removes the new view and GeoIP helpers. Restore the backed-up menu and ACL files manually if you want to revert those too. It does not remove the GeoLite2 database files or the `libmaxminddb` package.
+The installer detects `apk` versus `opkg`, downloads the newest GitHub release, installs the matching `libmaxminddb` helper package and complete REFFIX LuCI package, attempts to download the GeoLite2 databases, and restarts `rpcd`.
 
-## Build an installable package
+Current published package targets are **OpenWrt 25.12 (APK)** and **OpenWrt 24.10 (IPK)**, built for package architecture `aarch64_cortex-a53` (including the Flint4 / MediaTek Filogic target). Other CPU architectures are rejected by the installer rather than being given the wrong library binary.
 
-A package must be built inside an OpenWrt SDK/buildroot matching the router's OpenWrt release and target before it can be offered as an installable APK/IPK:
+### What happens to the existing `luci-app-log-viewer`?
 
-```sh
-# Copy this repository to package/luci-app-log-viewer in the matching build tree
-make menuconfig
-# Select LuCI -> Applications -> luci-app-log-viewer
-make package/luci-app-log-viewer/compile V=s
-```
+The REFFIX build deliberately uses the same package name, `luci-app-log-viewer`, and includes the original System Log and Kernel Log pages as well as the new Firewall Log. Installing it **upgrades/replaces the existing package in place**. You do not need to remove the old package first, and there is no dependency on a second upstream `luci-app-log-viewer` package.
 
-The output is under `bin/packages/...` for APK-based OpenWrt releases or `bin/packages/...` / `bin/targets/...` depending on the build setup. Publish only packages built for the matching release and architecture. Do not install an APK/IPK from another OpenWrt branch.
+The installer's second package, `libmaxminddb`, provides the local `mmdblookup` command used for GeoIP enrichment. The matching library package is attached to the release so the installer does not need to find that package in a third-party feed.
 
-GitHub Releases currently hosts the source pre-release. Prebuilt APK/IPK assets will be added only after matching SDK builds and router-side testing. A package feed is another option, but it needs builds and repository metadata for each supported release/architecture.
+### Manual installation
+
+Open [GitHub Releases](https://github.com/REFFIX-X/luci-app-log/releases) and download both matching assets for your firmware:
+
+- OpenWrt 25.12: `reffix-luci-app-log-viewer-openwrt-25.12.apk` and `reffix-libmaxminddb-openwrt-25.12.apk`.
+- OpenWrt 24.10: `reffix-luci-app-log-viewer-openwrt-24.10.ipk` and `reffix-libmaxminddb-openwrt-24.10.ipk`.
+
+Install the `libmaxminddb` package first, then the app package. For APK-based firmware, use `apk add --allow-untrusted /path/to/package.apk`; for opkg-based firmware, use `opkg install /path/to/package.ipk`. The installer script does this automatically.
+
+### Development overlay
+
+For testing only, the repository still contains `install.sh` and `uninstall.sh` to apply the source overlay manually. The overlay approach is not needed for normal installs; the packaged release is the preferred route because it replaces the existing application cleanly.
 
 ## GeoIP data and privacy
 
@@ -120,6 +62,6 @@ Monthly updates are a reasonable starting point. GeoIP is approximate; VPNs, pro
 
 ## Compatibility and upstream
 
-- Designed for LuCI / OpenWrt >= 22.03. The Firewall Log overlay has only source-level CI validation so far and has not yet been verified on every OpenWrt release or theme.
+- Designed for LuCI / OpenWrt >= 22.03. The automated build validates the source and creates packages for OpenWrt 25.12 and 24.10 on `aarch64_cortex-a53`. Hardware testing and compatibility with other release series, architectures, and third-party firmware builds are not yet guaranteed.
 - Upstream project: https://github.com/gSpotx2f/luci-app-log
 - The original project is MIT-licensed; preserve its license and attribution. GeoLite2 data terms are separate from the app's license.
