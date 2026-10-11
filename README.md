@@ -13,13 +13,24 @@ A REFFIX-maintained fork of [gSpotx2f/luci-app-log](https://github.com/gSpotx2f/
 
 ## Installation
 
-The current fork includes source files for the new Firewall Log view and helper scripts. A ready-to-install APK/IPK release has not yet been published, so use the source overlay steps below for now.
+The current fork is hosted on GitHub, so you can download its source archive directly to the router. A ready-to-install APK/IPK release has not yet been published. The overlay method below assumes the upstream `luci-app-log-viewer` package is already installed; it adds the Firewall Log page and does not replace the original System Log / Kernel Log implementation.
 
 ### Install on OpenWrt / GL.iNet Flint4
 
 Run the following commands on the router as root. Make a backup first, especially if you have customized the existing LuCI menu or ACL files.
 
-1. **Copy the repository to the router.** From Windows PowerShell, with the repo cloned locally:
+1. **Download the source from GitHub** (or use the Windows transfer option below):
+
+   ```sh
+   cd /tmp
+   uclient-fetch -O reffix-luci-app-log.tar.gz https://codeload.github.com/REFFIX-X/luci-app-log/tar.gz/refs/heads/master
+   tar -xzf reffix-luci-app-log.tar.gz
+   cd luci-app-log-master
+   ```
+
+   This fetches the latest committed source from the `master` branch. If `uclient-fetch` is unavailable, use `wget -O reffix-luci-app-log.tar.gz https://codeload.github.com/REFFIX-X/luci-app-log/tar.gz/refs/heads/master` instead.
+
+   **Windows PowerShell transfer alternative:** with the repository already cloned locally:
 
    ```powershell
    scp -r .\luci-app-log root@192.168.1.1:/tmp/
