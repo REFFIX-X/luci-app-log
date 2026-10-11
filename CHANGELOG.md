@@ -6,4 +6,4 @@
 - Keep both Country and ASN database lookups validated before replacing the currently installed database files.
 - Continue publishing the APK/IPK packages through the direct-download `package-assets` branch and GitHub release assets.
 
-Targets: OpenWrt 25.12 APK and OpenWrt 24.10 IPK for `aarch64_cortex-a53`.
+Targets: OpenWrt 25.12 APK and OpenWrt 24.10 IPK for `aarch64_cortex-a53`. Both package builds and mirror publication must pass before the installer index advances to this version.
