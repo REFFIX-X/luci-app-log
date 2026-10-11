@@ -55,15 +55,14 @@ function parseFields(line) {
 
 function parseLine(line, index) {
   let prefix = '';
-  if (line.includes('JELLYFIN_BLOCK:')) prefix = 'JELLYFIN_BLOCK';
-  else if (line.includes('INFRA_PORT_HIT:')) prefix = 'INFRA_PORT_HIT';
+  if (line.includes('INFRA_PORT_HIT:')) prefix = 'INFRA_PORT_HIT';
   else if (/\bDROP\b|\bREJECT\b/i.test(line) && /SRC=\S+.*DPT=\d+/.test(line))
     prefix = 'FIREWALL_DROP';
   else return null;
 
   const fields = parseFields(line);
   const port = Number(fields.DPT || 0);
-  const blocked = prefix === 'JELLYFIN_BLOCK' || /\bDROP\b|\bREJECT\b/i.test(line);
+  const blocked = prefix === 'FIREWALL_DROP' || /\bDROP\b|\bREJECT\b/i.test(line);
   const timestamp = (line.match(/^([A-Z][a-z]{2}\s+\w{3}\s+\d+\s+[\d:]+\s+\d{4})/) || ['', ''])[1];
 
   return {
@@ -99,9 +98,9 @@ return view.extend({
   maxEntries: 500,
 
   getLogData: function() {
-    return fs.exec_direct('/sbin/logread', ['-e', '(INFRA_PORT_HIT|JELLYFIN_BLOCK|DROP|REJECT)'], 'text')
+    return fs.exec_direct('/sbin/logread', ['-e', '(INFRA_PORT_HIT|DROP|REJECT)'], 'text')
       .catch(function() {
-        return fs.exec_direct('/usr/sbin/logread', ['-e', '(INFRA_PORT_HIT|JELLYFIN_BLOCK|DROP|REJECT)'], 'text');
+        return fs.exec_direct('/usr/sbin/logread', ['-e', '(INFRA_PORT_HIT|DROP|REJECT)'], 'text');
       });
   },
 
