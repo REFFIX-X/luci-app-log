@@ -1,114 +1,44 @@
-# REFFIX luci-app-log
+# REFFIX Log Viewer
 
-A REFFIX-maintained fork of [gSpotx2f/luci-app-log](https://github.com/gSpotx2f/luci-app-log) for OpenWrt LuCI. Retains the upstream System Log and Kernel Log views and adds a general-purpose **Firewall Log** with local GeoIP enrichment.
+REFFIX-maintained LuCI log viewer for OpenWrt, including System Log, Kernel Log, and a firewall-event dashboard with local GeoIP enrichment.
 
-## Features
+## Highlights
 
-- Original System Log and Kernel Log pages.
-- **Firewall Log** parses generic `INFRA_PORT_HIT`, `DROP` / `REJECT`, and explicitly logged block/allow markers (for example, rules tagged `JELLYFIN_BLOCK`). No Jellyfin-specific logic is hardcoded.
-- Readable table with timestamp, source IP, locally bundled GeoIP country flag/name and ASN organisation, destination IP, destination port/service, protocol, explicit verdict classification, source port, ingress interface and TCP flags. Source IPs can be copied with one click.
-- Filters for event type and TCP/UDP, search across IPs/countries/ASNs/ports/services, CSV export and periodic refresh.
-- GeoIP enrichment uses a local MaxMind GeoLite2 database. No per-IP lookup API is called. Country flag SVGs are bundled locally from the MIT-licensed flag-icons project. The browser loads them from this router, so external image hosts and CSP exceptions are not required.
-- Does not add or modify firewall rules.
+- Firewall events classified only from explicit log evidence: blocked, observed, or explicitly allowed.
+- Search and filters for addresses, ports, protocol, country and ASN.
+- Local GeoLite2 country/ASN lookup; no per-IP web lookup API.
+- CSV export, copyable IP addresses, recent-event summaries and scan/burst heuristics.
+- Monokai Pro-inspired dark palette coordinated with the REFFIX Footstrap theme family.
+- Existing package identity `luci-app-log-viewer` is retained so upgrades replace the installed app in place.
 
-## Installation
+## Install on a supported Flint4 / OpenWrt 25.12
 
-### One-line installer (recommended)
-
-On a supported Flint4 / aarch64 Cortex-A53 router, connect over SSH as root and run:
+Connect over SSH as root:
 
 ```sh
 uclient-fetch -qO- https://raw.githubusercontent.com/REFFIX-X/luci-app-log/master/install-online.sh | sh
 ```
 
-The installer detects `apk` versus `opkg`, reads the current package tag from the direct-download package mirror, installs the matching `libmaxminddb` helper package and complete REFFIX LuCI package, attempts to download the GeoLite2 databases, and restarts `rpcd`.
+The installer detects APK/IPK support and downloads the matching package and GeoIP helper. It first uses the package mirror; if GitHub's raw-content host is unavailable, it falls back to the assets attached to the pinned v2.0.0 release.
 
-Current published package targets are **OpenWrt 25.12 (APK)** and **OpenWrt 24.10 (IPK)**, built for package architecture `aarch64_cortex-a53` (including the Flint4 / MediaTek Filogic target). Other CPU architectures are rejected by the installer rather than being given the wrong library binary.
+Supported release assets:
+- OpenWrt 25.12, APK, `aarch64_cortex-a53`
+- OpenWrt 24.10, IPK, `aarch64_cortex-a53`
 
-### What happens to the existing `luci-app-log-viewer`?
+Manual packages and checksums are published on [GitHub Releases](https://github.com/REFFIX-X/luci-app-log/releases).
 
-The REFFIX build deliberately uses the same package name, `luci-app-log-viewer`, and includes the original System Log and Kernel Log pages as well as the new Firewall Log. Installing it **upgrades/replaces the existing package in place**. You do not need to remove the old package first, and there is no dependency on a second upstream `luci-app-log-viewer` package.
+## Firewall log semantics
 
-The installer's second package, `libmaxminddb`, provides the local `mmdblookup` command used for GeoIP enrichment. The matching library package is attached to the release so the installer does not need to find that package in a third-party feed.
+- **Blocked** is shown only for explicit DROP/REJECT or block-marker evidence.
+- **Observed** means the infrastructure watch rule logged a packet. It does not itself prove that traffic was blocked or allowed.
+- **Allowed** requires an explicit allow/accept log marker. Silent allow traffic is not inferred from absence of a drop.
+- Scan/burst signals are heuristic indicators, not proof of malicious activity.
+- The app reads logs and local GeoIP data. It does not add, remove or modify firewall rules.
 
-### Manual installation
+## GeoIP and privacy
 
-Open [GitHub Releases](https://github.com/REFFIX-X/luci-app-log/releases) and download both matching assets for your firmware:
+GeoIP databases are downloaded separately by the helper and are not bundled in source control. Review the [GeoLite2 EULA](https://www.maxmind.com/en/geolite2/eula) and [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) obligations before redistributing database files. GeoIP country and ASN matches are approximate.
 
-- OpenWrt 25.12: `reffix-luci-app-log-viewer-openwrt-25.12.apk` and `reffix-libmaxminddb-openwrt-25.12.apk`.
-- OpenWrt 24.10: `reffix-luci-app-log-viewer-openwrt-24.10.ipk` and `reffix-libmaxminddb-openwrt-24.10.ipk`.
+## Upstream and license
 
-Install the `libmaxminddb` package first, then the app package. For APK-based firmware, use `apk add --allow-untrusted /path/to/package.apk`; for opkg-based firmware, use `opkg install /path/to/package.ipk`. The installer script does this automatically.
-
-### Development overlay
-
-For testing only, the repository still contains `install.sh` and `uninstall.sh` to apply the source overlay manually. The overlay approach is not needed for normal installs; the packaged release is the preferred route because it replaces the existing application cleanly.
-
-## GeoIP data and privacy
-
-GeoLite2 Country and ASN database files are not bundled in the repository. The helper downloads them from the third-party [P3TERX/GeoLite.mmdb mirror](https://github.com/P3TERX/GeoLite.mmdb), not directly from MaxMind. Review the current [GeoLite2 EULA](https://www.maxmind.com/en/geolite2/eula) and [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) requirements before distributing or using the database files. Database updates can be run manually with:
-
-```sh
-/usr/bin/flint4-geoip-update
-```
-
-Monthly updates are a reasonable starting point. GeoIP is approximate; VPNs, proxies, mobile carrier networks, cloud egress and anycast can affect country and ASN attribution.
-
-## Firewall event meaning
-
-- `INFRA_PORT_HIT`: traffic matched the infrastructure watchlist. The existing logging-only rule returns to normal firewall processing and does not itself block traffic.
-- Generic `DROP` / `REJECT`: shown when the log line has source IP and destination port fields.
-- A TCP SYN is a connection attempt, not evidence that a service accepted the connection or that a compromise occurred.
-
-## Compatibility and upstream
-
-- Designed for LuCI / OpenWrt >= 22.03. The automated build validates the source and creates packages for OpenWrt 25.12 and 24.10 on `aarch64_cortex-a53`. Hardware testing and compatibility with other release series, architectures, and third-party firmware builds are not yet guaranteed.
-- Upstream project: https://github.com/gSpotx2f/luci-app-log
-- The original project is MIT-licensed; preserve its license and attribution. GeoLite2 data terms are separate from the app's license.
-
-
-## Verdict semantics
-
-- **Blocked** is shown only when a log line explicitly identifies DROP, REJECT or a block marker (for example, `JELLYFIN_BLOCK:`).
-- **Observed** means an `INFRA_PORT_HIT` watch rule logged the packet. This logging-only rule returns and does not itself decide the firewall verdict. The normal default-deny policy can still drop the packet later.
-- **Allowed** is shown only when a firewall rule emits an explicit ALLOW/ACCEPT marker. Traffic that is allowed silently is not visible as an allowed event.
-
-The app parses logs only. It does not change firewall policy or rules.
-
-
-## Firewall Log controls and verdicts
-
-- **Blocked** requires explicit DROP/REJECT or a block marker in the log.
-- **Observed** means `INFRA_PORT_HIT` logged a packet. Your watch rule returns, so this is not itself a block verdict; normal firewall processing and default-deny policy run separately.
-- **Allowed** appears only when a rule emits an explicit ALLOW/ACCEPT marker. Silent allowed traffic cannot be inferred from absence of a drop.
-- Time filters limit the displayed recent buffer. Pause live refresh to inspect rows.
-- Top sources, destination ports and GeoIP-resolved ASNs summarize the selected time window. GeoIP enrichment is capped at 60 unique source IPs per refresh to keep router load sensible.
-- Scan/burst signals are heuristics, not proof of malicious activity: a source is flagged at 8 or more distinct destination ports or 25 or more logged events in the selected window.
-- CSV includes the parsed verdict, original log marker and optional policy label/note.
-
-### Optional local policy labels
-
-The package includes an example configuration at `/usr/share/log-viewer/policies.example.json`. To activate and customize it:
-
-```sh
-mkdir -p /etc/log-viewer
-cp /usr/share/log-viewer/policies.example.json /etc/log-viewer/policies.json
-vi /etc/log-viewer/policies.json
-```
-
-The sample includes labels for `JELLYFIN_BLOCK`, `JELLYFIN_ALLOW` and `INFRA_PORT_HIT`. These labels only annotate log entries; they do not add or modify firewall rules. `JELLYFIN_ALLOW` events appear only if your allow rule emits that marker.
-
-
-## Display accessibility
-
-The Firewall Log uses higher-contrast text, stronger card boundaries and larger secondary labels while retaining the dark slate and amber/blue/green palette.
-
-
-### Readability (r27)
-
-The dashboard uses explicit high-contrast pixel sizing for table cells, statistics, toolbars, helper text and insight panels so labels remain legible under LuCI's inherited theme styles.
-
-
-## Firewall Log colorway
-
-The dashboard uses a Monokai Pro-inspired palette: warm charcoal background (`#2D2A2E`), deep panels (`#221F22`), warm off-white text (`#FCFCFA`), and yellow, pink, orange, green, cyan and purple accents. This is a small original CSS adaptation scoped to this LuCI view; it does not change the global LuCI theme.
+This project is a REFFIX-maintained fork of [gSpotx2f/luci-app-log](https://github.com/gSpotx2f/luci-app-log). The original application is MIT-licensed; see [LICENSE](LICENSE). Preserve upstream attribution and license notices when redistributing the derived application.
