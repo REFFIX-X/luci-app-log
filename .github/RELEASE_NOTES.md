@@ -1,6 +1,6 @@
 # REFFIX luci-app-log v1.5.0-r7
 
-This is a **source-only pre-release** of the REFFIX fork of `luci-app-log-viewer`.
+This is a **source-only pre-release** of the REFFIX fork of `luci-app-log-viewer`, adding a general-purpose firewall log page.
 
 ## What's included
 
@@ -9,7 +9,6 @@ This is a **source-only pre-release** of the REFFIX fork of `luci-app-log-viewer
 - Filtering, search, CSV export, service/port labels and periodic refresh.
 - LuCI menu and RPC ACL entries, overlay install/uninstall scripts.
 - Updated installation and troubleshooting documentation.
-- Removed the Jellyfin-specific marker so this fork is application-agnostic.
 
 ## Important
 
