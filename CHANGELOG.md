@@ -7,4 +7,4 @@
 - Keep the APK/IPK release assets and SHA-256 checksum files on GitHub Releases as before.
 - Bump package release to r15; keep the existing `luci-app-log-viewer` package name for in-place upgrades.
 
-Targeted builds remain OpenWrt 25.12 APK and OpenWrt 24.10 IPK for `aarch64_cortex-a53`.
+Targeted builds remain OpenWrt 25.12 APK and OpenWrt 24.10 IPK for `aarch64_cortex-a53`. The release workflow publishes the same binaries to the direct-download branch before publishing the GitHub Release.
