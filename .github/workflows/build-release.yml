@@ -85,6 +85,30 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Publish direct-download package mirror
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUBJECT="$(git log -1 --format=%s "$GITHUB_SHA")"
+          TAG="${SUBJECT#release: }"
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads "$REMOTE" package-assets >/dev/null 2>&1; then
+            git clone --depth 1 --branch package-assets "$REMOTE" package-mirror
+          else
+            mkdir package-mirror
+            git -C package-mirror init -b package-assets
+          fi
+          mkdir -p "package-mirror/${TAG}"
+          cp dist/* "package-mirror/${TAG}/"
+          printf '%s\\n' "$TAG" > package-mirror/latest
+          git -C package-mirror config user.name "github-actions[bot]"
+          git -C package-mirror config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C package-mirror add -- "$TAG" latest
+          git -C package-mirror commit -m "Publish OpenWrt packages for ${TAG}"
+          git -C package-mirror push "$REMOTE" HEAD:package-assets
+
       - name: Publish release with APK/IPK assets
         env:
           GH_TOKEN: ${{ github.token }}
