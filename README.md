@@ -8,7 +8,7 @@ REFFIX-maintained LuCI log viewer for OpenWrt, including System Log, Kernel Log,
 - Search and filters for addresses, ports, protocol, country and ASN.
 - Local GeoLite2 country/ASN lookup; no per-IP web lookup API.
 - CSV export, copyable IP addresses, recent-event summaries and scan/burst heuristics.
-- Monokai Pro-inspired dark palette coordinated with the REFFIX Footstrap theme family.
+- Monokai Pro-inspired dark palette coordinated with [REFFIX Monokai Pro for LuCI](https://github.com/REFFIX-X/luci-theme-footstrap).
 - Existing package identity `luci-app-log-viewer` is retained so upgrades replace the installed app in place.
 
 ## Install on a supported Flint4 / OpenWrt 25.12
@@ -24,7 +24,7 @@ The installer supports only OpenWrt 25.12/APK on the Flint4-class `aarch64_corte
 Supported release assets:
 - OpenWrt 25.12, APK, `aarch64_cortex-a53` only
 
-Manual APK packages and SHA-256 checksums are published on [GitHub Releases](https://github.com/REFFIX-X/luci-app-log/releases).
+Manual APK packages and SHA-256 checksums are published on [GitHub Releases](https://github.com/REFFIX-X/luci-app-log/releases). The matching [REFFIX Monokai Pro for LuCI theme](https://github.com/REFFIX-X/luci-theme-footstrap) has its own OpenWrt 25.12/APK release and installation guide.
 
 ## Firewall log semantics
 
