@@ -97,3 +97,8 @@ vi /etc/log-viewer/policies.json
 ```
 
 The sample includes labels for `JELLYFIN_BLOCK`, `JELLYFIN_ALLOW` and `INFRA_PORT_HIT`. These labels only annotate log entries; they do not add or modify firewall rules. `JELLYFIN_ALLOW` events appear only if your allow rule emits that marker.
+
+
+## Display accessibility
+
+The Firewall Log uses higher-contrast text, stronger card boundaries and larger secondary labels while retaining the dark slate and amber/blue/green palette.

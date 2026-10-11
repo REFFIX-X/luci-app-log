@@ -1,9 +1,10 @@
 # Changelog
 
-## v1.5.0-r25 - 2026-10-11
+## v1.5.0-r26 - 2026-10-11
 
-- Prevent out-of-order GitHub Actions builds from downgrading the direct-download `package-assets/latest` marker.
-- Include dashboard enhancements from r24/r23: time windows, pause/resume, top source/port/ASN summaries, scan/burst signals, policy-aware labels, explicit verdict semantics, copy-IP and richer CSV.
-- Bundle local country flags, fix ISO code case handling, and keep GeoLite2 updater validation safe.
+- Improve readability across insight cards, statistic tiles, scan/burst labels, table headers and event details while preserving the existing dark slate and amber/blue/green palette.
+- Replace low-opacity secondary text with brighter, higher-contrast colors and increase small-label sizing and line spacing.
+- Strengthen card borders and badge outlines so the visual hierarchy remains clear without adding new accent colors.
+- No change to event parsing, firewall rules, refresh behaviour or policy semantics.
 
-Targets: OpenWrt 25.12 APK and OpenWrt 24.10 IPK for `aarch64_cortex-a53`. The package index never moves backwards when older parallel builds finish late.
+Targets: OpenWrt 25.12 APK and OpenWrt 24.10 IPK for `aarch64_cortex-a53`.
