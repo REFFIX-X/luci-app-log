@@ -6,7 +6,7 @@ on:
       - master
 
 concurrency:
-  group: reffix-log-v2-release
+  group: reffix-log-release
   cancel-in-progress: true
 
 permissions:
@@ -94,7 +94,7 @@ jobs:
           set -euo pipefail
           SUBJECT="$(git log -1 --format=%s "$GITHUB_SHA")"
           TAG="${SUBJECT#release: }"
-          [ "$TAG" = "v2.0.0" ] || { echo "Only v2.0.0 is publishable from this release workflow; got $TAG" >&2; exit 1; }
+          case "$TAG" in v*) ;; *) echo "Release commit must start with 'release: v'" >&2; exit 1 ;; esac
           REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           if git ls-remote --exit-code --heads "$REMOTE" package-assets >/dev/null 2>&1; then
             git clone --depth 1 --branch package-assets "$REMOTE" package-mirror
@@ -102,8 +102,7 @@ jobs:
             mkdir package-mirror
             git -C package-mirror init -b package-assets
           fi
-          # Drop every pre-v2 package directory; the mirror now serves only this release.
-          find package-mirror -mindepth 1 -maxdepth 1 -type d ! -name .git -exec rm -rf {} +
+          # Keep prior package versions available for existing installer fallbacks.
           mkdir -p "package-mirror/${TAG}"
           cp dist/* "package-mirror/${TAG}/"
           printf '%s\n' "$TAG" > package-mirror/latest
@@ -113,7 +112,7 @@ jobs:
           git -C package-mirror commit -m "Publish OpenWrt packages for ${TAG}"
           git -C package-mirror push "$REMOTE" HEAD:package-assets
 
-      - name: Publish v2.0.0 APK release and clean legacy releases
+      - name: Publish APK release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -139,21 +138,3 @@ jobs:
             gh release delete "$TAG" --yes --cleanup-tag
           fi
           gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "$TAG - REFFIX Log Viewer" --notes-file "$RUNNER_TEMP/release-notes.md"
-
-          # This project now publishes one release only: v2.0.0 for OpenWrt 25.12.
-          while IFS= read -r OLD_TAG; do
-            [ -n "$OLD_TAG" ] || continue
-            [ "$OLD_TAG" = "$TAG" ] && continue
-            echo "Removing legacy release $OLD_TAG"
-            gh release delete "$OLD_TAG" --yes --cleanup-tag || true
-          done < <(gh release list --limit 1000 --json tagName --jq '.[].tagName')
-
-          # Also remove orphaned old release tags that no longer have a GitHub Release.
-          EXISTING_TAGS="$(gh api --paginate "repos/$GITHUB_REPOSITORY/tags" --jq '.[].name')"
-          while IFS= read -r OLD_TAG; do
-            [ -n "$OLD_TAG" ] || continue
-            [ "$OLD_TAG" = "$TAG" ] && continue
-            gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$OLD_TAG" >/dev/null 2>&1 || true
-          done <<EOF
-          $EXISTING_TAGS
-          EOF

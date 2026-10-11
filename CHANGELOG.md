@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2.1.0
 
 - Verifies both APK downloads against the published SHA-256 file before package installation.
 - Documents OpenWrt 25.12 and supported MediaTek Filogic snapshot installation.
