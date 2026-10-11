@@ -40,17 +40,24 @@ else
 fi
 
 echo "REFFIX LuCI installer: detected ${PM}, target family ${FAMILY}, architecture ${ARCH}."
-fetch "https://api.github.com/repos/${REPO}/releases?per_page=10" "$TMP/releases.json"
-VERSION="$(sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\(v[^\"]*\)".*/\1/p' "$TMP/releases.json" | head -n 1)"
-if [ -z "$VERSION" ]; then
-  echo "ERROR: could not determine the newest GitHub release." >&2
-  exit 1
-fi
-BASE="https://github.com/${REPO}/releases/download/${VERSION}"
+fetch "https://api.github.com/repos/${REPO}/releases?per_page=30" "$TMP/releases.json"
 APP="$TMP/reffix-luci-app-log-viewer.${EXT}"
 LIB="$TMP/reffix-libmaxminddb.${EXT}"
-fetch "$BASE/reffix-libmaxminddb-openwrt-${FAMILY}.${EXT}" "$LIB"
-fetch "$BASE/reffix-luci-app-log-viewer-openwrt-${FAMILY}.${EXT}" "$APP"
+VERSION=""
+VERSIONS="$(sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"(v[^\"]*)".*/\1/p' "$TMP/releases.json" | awk '{ a[NR]=$0 } END { for (i=NR; i>0; i--) print a[i] }')"
+for candidate in $VERSIONS; do
+  BASE="https://github.com/${REPO}/releases/download/${candidate}"
+  if fetch "$BASE/reffix-libmaxminddb-openwrt-${FAMILY}.${EXT}" "$LIB" &&
+     fetch "$BASE/reffix-luci-app-log-viewer-openwrt-${FAMILY}.${EXT}" "$APP"; then
+    VERSION="$candidate"
+    break
+  fi
+done
+if [ -z "$VERSION" ]; then
+  echo "ERROR: no GitHub release has packages for OpenWrt ${FAMILY} (${EXT}) and this architecture." >&2
+  exit 1
+fi
+echo "Using package release ${VERSION}."
 
 echo "Installing GeoIP helper library..."
 if [ "$PM" = apk ]; then
