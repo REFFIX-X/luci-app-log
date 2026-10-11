@@ -1,9 +1,13 @@
-name: Build and publish OpenWrt packages
+# REFFIX Log Viewer release pipeline: OpenWrt 25.12 / APK only.
 
 on:
   push:
     branches:
       - master
+
+concurrency:
+  group: reffix-log-v2-release
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -19,9 +23,6 @@ jobs:
           - family: '25.12'
             sdk: 'aarch64_cortex-a53-25.12.5'
             ext: apk
-          - family: '24.10'
-            sdk: 'aarch64_cortex-a53-24.10.8'
-            ext: ipk
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -35,7 +36,7 @@ jobs:
           cp -a Makefile htdocs root .build-feed/luci-app-log-viewer/
           cp packaging/libmaxminddb/Makefile .build-feed/libmaxminddb/Makefile
 
-      - name: Build APK/IPK packages
+      - name: Build OpenWrt 25.12 APK packages
         uses: openwrt/gh-action-sdk@main
         env:
           ARCH: ${{ matrix.sdk }}
@@ -93,6 +94,7 @@ jobs:
           set -euo pipefail
           SUBJECT="$(git log -1 --format=%s "$GITHUB_SHA")"
           TAG="${SUBJECT#release: }"
+          [ "$TAG" = "v2.0.0" ] || { echo "Only v2.0.0 is publishable from this release workflow; got $TAG" >&2; exit 1; }
           REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           if git ls-remote --exit-code --heads "$REMOTE" package-assets >/dev/null 2>&1; then
             git clone --depth 1 --branch package-assets "$REMOTE" package-mirror
@@ -100,22 +102,18 @@ jobs:
             mkdir package-mirror
             git -C package-mirror init -b package-assets
           fi
+          # Drop every pre-v2 package directory; the mirror now serves only this release.
+          find package-mirror -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} +
           mkdir -p "package-mirror/${TAG}"
           cp dist/* "package-mirror/${TAG}/"
-          CURRENT_LATEST=""
-          if [ -f package-mirror/latest ]; then CURRENT_LATEST="$(cat package-mirror/latest)"; fi
-          if [ -z "$CURRENT_LATEST" ] || [ "$(printf '%s\n%s\n' "$CURRENT_LATEST" "$TAG" | sort -V | tail -n1)" = "$TAG" ]; then
-            printf '%s\n' "$TAG" > package-mirror/latest
-          else
-            echo "Keeping newer package marker $CURRENT_LATEST; not downgrading it to $TAG."
-          fi
+          printf '%s\n' "$TAG" > package-mirror/latest
           git -C package-mirror config user.name "github-actions[bot]"
           git -C package-mirror config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git -C package-mirror add -- "$TAG" latest
           git -C package-mirror commit -m "Publish OpenWrt packages for ${TAG}"
           git -C package-mirror push "$REMOTE" HEAD:package-assets
 
-      - name: Publish release with APK/IPK assets
+      - name: Publish v2.0.0 APK release and clean legacy releases
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -131,10 +129,28 @@ jobs:
 
           Assets:
           - OpenWrt 25.12 APK app and matching libmaxminddb helper.
-          - OpenWrt 24.10 IPK app and matching libmaxminddb helper.
-          - SHA-256 checksums for both package pairs.
+          - SHA-256 checksums for the APK package pair.
 
           The existing luci-app-log-viewer package name is retained for in-place upgrades.
           The release is source-validated; test on-router before production use. GeoLite2 data is downloaded separately.
           EOF
-          gh release create "$TAG" dist/* --target "$GITHUB_SHA" --prerelease --title "$TAG - REFFIX Log Viewer" --notes-file "$RUNNER_TEMP/release-notes.md"
+          # Do not carry forward a partial release from an interrupted build.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release delete "$TAG" --yes --cleanup-tag
+          fi
+          gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "$TAG - REFFIX Log Viewer" --notes-file "$RUNNER_TEMP/release-notes.md"
+
+          # This project now publishes one release only: v2.0.0 for OpenWrt 25.12.
+          while IFS= read -r OLD_TAG; do
+            [ -n "$OLD_TAG" ] || continue
+            [ "$OLD_TAG" = "$TAG" ] && continue
+            echo "Removing legacy release $OLD_TAG"
+            gh release delete "$OLD_TAG" --yes --cleanup-tag || true
+          done < <(gh release list --limit 1000 --json tagName --jq '.[].tagName')
+
+          # Also remove orphaned old release tags that no longer have a GitHub Release.
+          while IFS= read -r OLD_TAG; do
+            [ -n "$OLD_TAG" ] || continue
+            [ "$OLD_TAG" = "$TAG" ] && continue
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$OLD_TAG" >/dev/null 2>&1 || true
+          done < <(gh api --paginate "repos/$GITHUB_REPOSITORY/tags" --jq '.[].name')
