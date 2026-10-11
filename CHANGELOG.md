@@ -1,10 +1,10 @@
 # Changelog
 
-## v1.5.0-r26 - 2026-10-11
+## v1.5.0-r27 - 2026-10-11
 
-- Improve readability across insight cards, statistic tiles, scan/burst labels, table headers and event details while preserving the existing dark slate and amber/blue/green palette.
-- Replace low-opacity secondary text with brighter, higher-contrast colors and increase small-label sizing and line spacing.
-- Strengthen card borders and badge outlines so the visual hierarchy remains clear without adding new accent colors.
-- No change to event parsing, firewall rules, refresh behaviour or policy semantics.
+- Strengthen readability after the initial contrast pass was too subtle at the actual LuCI rendered size.
+- Set explicit pixel sizes for table cells, insight rows, helper text, toolbar controls and KPI labels/numbers using `!important` to beat inherited LuCI rules.
+- Increase text brightness, weight, line-height and card/table padding while keeping the established dark slate, blue, amber and green palette.
+- No changes to event parsing, verdict logic, policy config, or firewall behaviour.
 
 Targets: OpenWrt 25.12 APK and OpenWrt 24.10 IPK for `aarch64_cortex-a53`.

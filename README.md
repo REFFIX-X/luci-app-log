@@ -102,3 +102,8 @@ The sample includes labels for `JELLYFIN_BLOCK`, `JELLYFIN_ALLOW` and `INFRA_POR
 ## Display accessibility
 
 The Firewall Log uses higher-contrast text, stronger card boundaries and larger secondary labels while retaining the dark slate and amber/blue/green palette.
+
+
+### Readability (r27)
+
+The dashboard uses explicit high-contrast pixel sizing for table cells, statistics, toolbars, helper text and insight panels so labels remain legible under LuCI's inherited theme styles.

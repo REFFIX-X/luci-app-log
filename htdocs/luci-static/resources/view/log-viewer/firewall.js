@@ -435,7 +435,33 @@ return view.extend({
       '.fw-badge{font-size:.88em;padding:.2em .6em;font-weight:750}' +
       '.fw-badge.observed{background:#8a6800;color:#fff;border:1px solid #c69d16}' +
       '.fw-badge.blocked,.fw-badge.danger{background:#a52d32;color:#fff;border:1px solid #e16a70}' +
-      '.fw-badge.allowed{background:#246d49;color:#fff;border:1px solid #58af7e}'
+      '.fw-badge.allowed{background:#246d49;color:#fff;border:1px solid #58af7e}' +
+      /* Explicit pixel sizing beats inherited LuCI opacity and tiny relative text. */
+      '.fw-description{color:#e1e9f4!important;font-size:14px!important;line-height:1.55!important;font-weight:500}' +
+      '.fw-stats,.fw-insights,.fw-toolbar,.fw-tablewrap{font-size:16px!important}' +
+      '.fw-insight{color:#f0f4fa!important;border-color:#566476!important;background:#242a31!important;padding:14px!important}' +
+      '.fw-insight h3{color:#ffffff!important;font-size:16px!important;font-weight:800!important;line-height:1.35!important;margin-bottom:9px!important}' +
+      '.fw-insight-list li{font-size:14px!important;line-height:1.45!important;padding:7px 0!important;color:#edf2f8!important;border-bottom-color:#4b5665!important}' +
+      '.fw-insight-list li span{color:#edf3fb!important;font-size:13px!important;font-weight:750!important}' +
+      '.fw-insight-list li small{color:#d0dae7!important;font-size:13px!important;line-height:1.5!important;opacity:1!important}' +
+      '.fw-muted{color:#d2dce9!important;font-size:13px!important;line-height:1.5!important;opacity:1!important}' +
+      '.fw-signal{color:#ffe8b3!important;font-size:12px!important;font-weight:800!important;padding:3px 6px!important;border:1px solid #a98736!important}' +
+      '.fw-event-policy{color:#d8e2ee!important;font-size:12px!important;line-height:1.45!important;opacity:1!important}' +
+      '.fw-stat{padding:13px!important;background:#242a31!important;border-color:#566476!important}' +
+      '.fw-stat span{color:#d6e0ed!important;font-size:12px!important;font-weight:800!important;letter-spacing:.055em!important;opacity:1!important}' +
+      '.fw-stat strong{color:#ffffff!important;font-size:28px!important;font-weight:800!important;line-height:1.25!important}' +
+      '.fw-toolbar input,.fw-toolbar select,.fw-toolbar button{font-size:14px!important;line-height:1.4!important;min-height:36px!important;color:#f2f6fc!important}' +
+      '.fw-table{font-size:14px!important}' +
+      '.fw-table th{color:#ffffff!important;font-size:14px!important;font-weight:800!important;padding:11px 9px!important;background:#2a3039!important;border-bottom:1px solid #667487!important}' +
+      '.fw-table td{color:#edf2f9!important;font-size:14px!important;line-height:1.45!important;padding:10px 9px!important}' +
+      '.fw-source code{color:#ffffff!important;font-size:14px!important;font-weight:750!important}' +
+      '.fw-source small,.fw-detail small,.fw-table td:nth-child(4) small{color:#d0dbea!important;font-size:13px!important;line-height:1.45!important;opacity:1!important}' +
+      '.fw-time{color:#eaf0f8!important;font-size:13px!important}' +
+      '.fw-copy-ip{font-size:12px!important;min-height:25px!important;color:#e4efff!important;border-color:#607b9c!important;background:#263b52!important}' +
+      '.fw-badge{font-size:13px!important;font-weight:850!important;padding:4px 8px!important;border-radius:5px!important}' +
+      '.fw-badge.observed{background:#997400!important;color:#ffffff!important;border:1px solid #f0c84b!important}' +
+      '.fw-badge.blocked,.fw-badge.danger{background:#b52e38!important;color:#ffffff!important;border:1px solid #ff8189!important}' +
+      '.fw-badge.allowed{background:#176b45!important;color:#ffffff!important;border:1px solid #61d39c!important}'
     ));
 
     this.stats = E('div', {class: 'fw-stats'});
@@ -477,7 +503,7 @@ return view.extend({
     ]);
 
     const result = E('div', {}, [
-      E('p', {class: 'cbi-section-descr'}, _('Verdicts matter: Blocked requires explicit DROP/REJECT/BLOCK evidence. Observed means INFRA_PORT_HIT saw a packet, but final verdict is unknown because that watch rule returns and normal firewall policy handles it. Allowed appears only when an ALLOW/ACCEPT rule explicitly logs. Select a time window, pause live refresh, inspect top sources/ports/ASNs and scan-like bursts. GeoIP is local; MAC, TOS and packet-ID noise are omitted.')),
+      E('p', {class: 'cbi-section-descr fw-description'}, _('Verdicts matter: Blocked requires explicit DROP/REJECT/BLOCK evidence. Observed means INFRA_PORT_HIT saw a packet, but final verdict is unknown because that watch rule returns and normal firewall policy handles it. Allowed appears only when an ALLOW/ACCEPT rule explicitly logs. Select a time window, pause live refresh, inspect top sources/ports/ASNs and scan-like bursts. GeoIP is local; MAC, TOS and packet-ID noise are omitted.')),
       this.stats,
       E('div', {class: 'fw-toolbar'}, [
         this.search, this.kind, this.proto, this.window,
