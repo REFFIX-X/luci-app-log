@@ -409,14 +409,14 @@ return view.extend({
         background: var(--mp-bg) !important;
         border: 1px solid var(--mp-border);
         border-radius: 12px;
-        font-size: 15px;
+        font-size: 14px;
         line-height: 1.5;
         color-scheme: dark;
       }
       .fw-shell * { box-sizing: border-box; }
       .fw-shell .fw-description {
         color: var(--mp-muted) !important;
-        font-size: 14px !important;
+        font-size: 13px !important;
         line-height: 1.6 !important;
         font-weight: 500;
         margin: 0 0 14px;
@@ -438,7 +438,7 @@ return view.extend({
       .fw-shell .fw-stat span {
         display: block;
         color: var(--mp-muted) !important;
-        font-size: 12px !important;
+        font-size: 11px !important;
         font-weight: 800;
         line-height: 1.35;
         letter-spacing: .06em;
@@ -448,7 +448,7 @@ return view.extend({
         display: block;
         margin-top: 4px;
         color: var(--mp-fg) !important;
-        font-size: 28px !important;
+        font-size: 27px !important;
         font-weight: 850;
         line-height: 1.25;
         font-variant-numeric: tabular-nums;
@@ -467,7 +467,7 @@ return view.extend({
         gap: 8px;
         margin: 12px 0;
         color: var(--mp-muted) !important;
-        font-size: 14px !important;
+        font-size: 13px !important;
       }
       .fw-shell .fw-toolbar input,
       .fw-shell .fw-toolbar select {
@@ -479,7 +479,7 @@ return view.extend({
         border: 1px solid var(--mp-border) !important;
         border-radius: 7px !important;
         box-shadow: none !important;
-        font-size: 14px !important;
+        font-size: 13px !important;
       }
       .fw-shell .fw-toolbar input::placeholder { color: #B0AAB2 !important; opacity: 1; }
       .fw-shell .fw-toolbar input:focus,
@@ -495,7 +495,7 @@ return view.extend({
         background: var(--mp-hover) !important;
         border: 1px solid #625B65 !important;
         border-radius: 7px !important;
-        font-size: 14px !important;
+        font-size: 13px !important;
         font-weight: 700;
         transition: background .12s ease, border-color .12s ease;
       }
@@ -514,12 +514,12 @@ return view.extend({
       }
       .fw-shell .fw-toolbar .right {
         color: var(--mp-muted) !important;
-        font-size: 13px !important;
+        font-size: 12px !important;
         font-variant-numeric: tabular-nums;
       }
       .fw-shell .fw-muted {
         color: var(--mp-muted) !important;
-        font-size: 13px !important;
+        font-size: 12px !important;
         line-height: 1.55 !important;
         opacity: 1 !important;
       }
@@ -541,7 +541,7 @@ return view.extend({
       .fw-shell .fw-insight h3 {
         margin: 0 0 10px !important;
         color: var(--mp-fg) !important;
-        font-size: 16px !important;
+        font-size: 15px !important;
         font-weight: 850 !important;
         line-height: 1.35;
         letter-spacing: .01em;
@@ -558,20 +558,20 @@ return view.extend({
         padding: 8px 0 !important;
         color: var(--mp-fg) !important;
         border-bottom: 1px solid #413C43 !important;
-        font-size: 14px !important;
+        font-size: 13px !important;
         line-height: 1.45 !important;
       }
       .fw-shell .fw-insight-list li:last-child { border-bottom: 0 !important; }
       .fw-shell .fw-insight-list li span {
         color: var(--mp-fg) !important;
-        font-size: 13px !important;
+        font-size: 12px !important;
         font-weight: 750;
         white-space: nowrap;
       }
       .fw-shell .fw-insight-list li small {
         grid-column: 1 / -1;
         color: var(--mp-muted) !important;
-        font-size: 13px !important;
+        font-size: 12px !important;
         font-weight: 500;
         line-height: 1.5 !important;
         opacity: 1 !important;
@@ -585,7 +585,7 @@ return view.extend({
         border: 1px solid #49434B;
         border-radius: 4px;
         padding: 2px 5px;
-        font-size: 13px !important;
+        font-size: 12px !important;
         font-weight: 700;
       }
       .fw-shell .fw-signal {
@@ -594,7 +594,7 @@ return view.extend({
         background: #51412A !important;
         border: 1px solid #8C7040 !important;
         border-radius: 5px;
-        font-size: 12px !important;
+        font-size: 11px !important;
         font-weight: 850;
         white-space: nowrap;
       }
@@ -604,7 +604,7 @@ return view.extend({
         max-width: 18em;
         margin-top: 3px;
         color: var(--mp-muted) !important;
-        font-size: 12px !important;
+        font-size: 11px !important;
         line-height: 1.45;
         opacity: 1 !important;
         overflow-wrap: anywhere;
@@ -623,7 +623,7 @@ return view.extend({
         border-collapse: separate;
         border-spacing: 0;
         background: var(--mp-bg) !important;
-        font-size: 14px !important;
+        font-size: 13px !important;
       }
       .fw-shell .fw-table thead th {
         position: sticky;
@@ -633,7 +633,7 @@ return view.extend({
         color: var(--mp-fg) !important;
         background: #403A42 !important;
         border-bottom: 1px solid #645A67 !important;
-        font-size: 13px !important;
+        font-size: 12px !important;
         font-weight: 850 !important;
         line-height: 1.4;
         text-align: left;
@@ -648,7 +648,7 @@ return view.extend({
         padding: 10px !important;
         color: var(--mp-fg) !important;
         border-bottom: 1px solid #443E46 !important;
-        font-size: 14px !important;
+        font-size: 13px !important;
         font-weight: 500;
         line-height: 1.5 !important;
         vertical-align: top;
@@ -656,13 +656,13 @@ return view.extend({
       .fw-shell .fw-time {
         min-width: 130px;
         color: #E3DDE5 !important;
-        font-size: 13px !important;
+        font-size: 12px !important;
         white-space: nowrap;
       }
-      .fw-shell .fw-source { min-width: 220px; }
+      .fw-shell .fw-source { min-width: 190px; }
       .fw-shell .fw-source code {
         color: #FFFFFF !important;
-        font-size: 14px !important;
+        font-size: 13px !important;
         font-weight: 800;
         white-space: nowrap;
       }
@@ -672,13 +672,18 @@ return view.extend({
         display: block;
         margin-top: 4px;
         color: var(--mp-muted) !important;
-        font-size: 13px !important;
+        font-size: 12px !important;
         font-weight: 500;
         line-height: 1.5 !important;
         opacity: 1 !important;
       }
-      .fw-shell .fw-table td:nth-child(3) code { color: var(--mp-cyan) !important; }
-      .fw-shell .fw-table td:nth-child(4) strong { color: var(--mp-orange) !important; font-size: 15px; }
+      .fw-shell .fw-table td:nth-child(3) code {
+        color: var(--mp-cyan) !important;
+        white-space: nowrap;
+        display: inline-block;
+      }
+      .fw-shell .fw-table td:nth-child(3) { white-space: nowrap; }
+      .fw-shell .fw-table td:nth-child(4) strong { color: var(--mp-orange) !important; font-size: 14px; }
       .fw-shell .fw-table a {
         color: var(--mp-cyan) !important;
         font-weight: 750;
@@ -693,7 +698,7 @@ return view.extend({
         background: #2D3940 !important;
         border: 1px solid #53666B !important;
         border-radius: 5px !important;
-        font-size: 12px !important;
+        font-size: 11px !important;
         font-weight: 750;
       }
       .fw-shell .fw-badge {
@@ -701,7 +706,7 @@ return view.extend({
         padding: 4px 8px !important;
         border: 1px solid transparent;
         border-radius: 5px !important;
-        font-size: 13px !important;
+        font-size: 12px !important;
         font-weight: 850 !important;
         line-height: 1.35;
         white-space: nowrap;
