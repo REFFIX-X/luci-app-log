@@ -1,21 +1,15 @@
 #
-# Copyright (C) 2026 gSpot (https://github.com/gSpotx2f/luci-app-log)
+# REFFIX maintained fork of gSpotx2f/luci-app-log
+# Original application is distributed under the MIT License.
 #
-# This is free software, licensed under the MIT License.
-#
-
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-log-viewer
 PKG_VERSION:=1.5.0
-PKG_RELEASE:=5
-LUCI_TITLE:=Advanced syslog and kernel log (tail, search, etc)
-LUCI_DEPENDS:=+ucode +ucode-mod-fs
+PKG_RELEASE:=6
+LUCI_TITLE:=Advanced syslog, kernel and firewall log viewer
+LUCI_DEPENDS:=+ucode +ucode-mod-fs +libmaxminddb
 LUCI_PKGARCH:=all
-#LUCI_PKGARCH:=noarch
 PKG_LICENSE:=MIT
 
-#include ../../luci.mk
 include $(TOPDIR)/feeds/luci/luci.mk
-
-# call BuildPackage - OpenWrt buildroot signature

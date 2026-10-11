@@ -1,0 +1,29 @@
+#!/bin/sh
+# Local MaxMind GeoLite2 lookup. Requires libmaxminddb (mmdblookup).
+set -e
+if [ "$#" -ne 2 ] || [ "$1" != "--json" ]; then
+  echo '{"error":"usage: flint4-geoip --json IP"}'
+  exit 2
+fi
+ip="$2"
+case "$ip" in *[!0-9a-fA-F:.]*) echo '{"error":"invalid IP"}'; exit 2;; esac
+
+country_db=/usr/share/GeoIP/GeoLite2-Country.mmdb
+asn_db=/usr/share/GeoIP/GeoLite2-ASN.mmdb
+cc=""
+country=""
+asn=""
+
+if [ -s "$country_db" ] && command -v mmdblookup >/dev/null 2>&1; then
+  cc="$(mmdblookup --file "$country_db" --ip "$ip" country iso_code 2>/dev/null | sed -n 's/.*"\([A-Z][A-Z]\)".*/\1/p' | head -n1 || true)"
+  country="$(mmdblookup --file "$country_db" --ip "$ip" country names en 2>/dev/null | sed -n 's/.*"\(.*\)".*/\1/p' | head -n1 || true)"
+fi
+if [ -s "$asn_db" ] && command -v mmdblookup >/dev/null 2>&1; then
+  asn="$(mmdblookup --file "$asn_db" --ip "$ip" autonomous_system_organization 2>/dev/null | sed -n 's/.*"\(.*\)".*/\1/p' | head -n1 || true)"
+fi
+
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\r\n'
+}
+printf '{"country_code":"%s","country_name":"%s","asn_organization":"%s"}\n' \
+  "$(json_escape "$cc")" "$(json_escape "$country")" "$(json_escape "$asn")"

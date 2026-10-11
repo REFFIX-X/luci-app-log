@@ -1,0 +1,41 @@
+#!/bin/sh
+# Refresh local GeoLite2 Country and ASN databases. Validate downloads before replacement.
+set -eu
+BASE=/usr/share/GeoIP
+TMP="/tmp/geolite-update.$$"
+mkdir -p "$BASE" "$TMP"
+trap 'rm -rf "$TMP"' EXIT INT TERM
+
+if ! command -v mmdblookup >/dev/null 2>&1; then
+  echo "Install libmaxminddb first (apk add libmaxminddb or opkg install libmaxminddb)." >&2
+  exit 1
+fi
+
+fetch() {
+  if command -v uclient-fetch >/dev/null 2>&1; then
+    uclient-fetch -O "$2" "$1"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -O "$2" "$1"
+  else
+    echo "Need uclient-fetch or wget." >&2
+    exit 1
+  fi
+}
+
+BASEURL=https://github.com/P3TERX/GeoLite.mmdb/raw/download
+fetch "$BASEURL/GeoLite2-Country.mmdb" "$TMP/GeoLite2-Country.mmdb"
+fetch "$BASEURL/GeoLite2-ASN.mmdb" "$TMP/GeoLite2-ASN.mmdb"
+
+if [ ! -s "$TMP/GeoLite2-Country.mmdb" ] || [ ! -s "$TMP/GeoLite2-ASN.mmdb" ]; then
+  echo "GeoIP download is empty; keeping current database files." >&2
+  exit 1
+fi
+
+mmdblookup --file "$TMP/GeoLite2-Country.mmdb" --ip 1.1.1.1 country iso_code >/dev/null
+mmdblookup --file "$TMP/GeoLite2-ASN.mmdb" --ip 1.1.1.1 autonomous_system_organization >/dev/null
+
+cp "$TMP/GeoLite2-Country.mmdb" "$BASE/GeoLite2-Country.mmdb.new"
+cp "$TMP/GeoLite2-ASN.mmdb" "$BASE/GeoLite2-ASN.mmdb.new"
+mv "$BASE/GeoLite2-Country.mmdb.new" "$BASE/GeoLite2-Country.mmdb"
+mv "$BASE/GeoLite2-ASN.mmdb.new" "$BASE/GeoLite2-ASN.mmdb"
+echo "GeoLite2 Country and ASN databases updated."

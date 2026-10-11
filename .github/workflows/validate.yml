@@ -1,0 +1,27 @@
+name: Validate LuCI source
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: JavaScript syntax
+        run: node --check htdocs/luci-static/resources/view/log-viewer/firewall.js
+      - name: Shell syntax
+        run: |
+          sh -n install.sh
+          sh -n uninstall.sh
+          sh -n root/usr/bin/flint4-geoip
+          sh -n root/usr/bin/flint4-geoip-update
+      - name: JSON syntax
+        run: |
+          python3 -m json.tool root/usr/share/luci/menu.d/luci-app-log-viewer.json >/dev/null
+          python3 -m json.tool root/usr/share/rpcd/acl.d/luci-app-log-viewer.json >/dev/null
