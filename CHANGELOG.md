@@ -1,12 +1,11 @@
 # Changelog
 
-## v1.5.0-r8 - 2026-10-11
+## v1.5.0-r9 - 2026-10-11
 
-- Build a complete `luci-app-log-viewer` APK/IPK package that includes all original log pages and the REFFIX Firewall Log.
-- Publish matching release assets for the app and `libmaxminddb`, plus SHA-256 checksums, for OpenWrt 25.12 and 24.10.
-- Add a matching `libmaxminddb` package to releases so local GeoIP does not rely on an unrelated package feed.
-- Add a one-line online installer that detects APK/opkg and upgrades the existing app package in place.
-- Automate package builds and GitHub release assets for OpenWrt 25.12 (APK) and 24.10 (IPK) on `aarch64_cortex-a53`.
-- Publish SHA-256 checksums and clarify package installation in the README.
+- Build a complete `luci-app-log-viewer` APK/IPK package including the original log pages and REFFIX Firewall Log.
+- Include a matching `libmaxminddb` package so the one-line installer does not rely on a third-party package feed for local GeoIP.
+- Add an online installer that detects APK/opkg and upgrades the installed app in place.
+- Automate OpenWrt 25.12 APK and 24.10 IPK builds for `aarch64_cortex-a53`.
+- Publish SHA-256 checksums and document install and upgrade behavior.
 
-This release uses the existing package name, so an already installed `luci-app-log-viewer` is upgraded/replaced rather than kept as a second required package. Router-side testing is still recommended.
+The package name remains `luci-app-log-viewer`, so an existing installation is upgraded/replaced in place. Router-side testing is still recommended.
