@@ -7,4 +7,4 @@
 - Include Firewall Log event loading fix from r17 and GeoIP database validation fix from r16.
 - Continue supporting OpenWrt 25.12 APK and OpenWrt 24.10 IPK for `aarch64_cortex-a53`.
 
-The release workflow publishes packages to the direct-download mirror and GitHub Releases only after both SDK builds succeed.
+The release workflow publishes packages to the direct-download mirror and GitHub Releases only after both SDK builds succeed. Package release number: `r19`.
