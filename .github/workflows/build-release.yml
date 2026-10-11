@@ -1,0 +1,111 @@
+name: Build and publish OpenWrt packages
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  build-packages:
+    if: "startsWith(github.event.head_commit.message, 'release: v')"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - family: '25.12'
+            sdk: 'aarch64_cortex-a53-25.12.5'
+            ext: apk
+          - family: '24.10'
+            sdk: 'aarch64_cortex-a53-24.10.8'
+            ext: ipk
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare local OpenWrt feed
+        shell: bash
+        run: |
+          mkdir -p .build-feed/luci-app-log-viewer .build-feed/libmaxminddb artifacts
+          cp -a Makefile htdocs root .build-feed/luci-app-log-viewer/
+          cp packaging/libmaxminddb/Makefile .build-feed/libmaxminddb/Makefile
+
+      - name: Build APK/IPK packages
+        uses: openwrt/gh-action-sdk@main
+        env:
+          ARCH: ${{ matrix.sdk }}
+          FEEDNAME: reffix
+          FEED_DIR: ${{ github.workspace }}/.build-feed
+          ARTIFACTS_DIR: ${{ github.workspace }}/artifacts
+          PACKAGES: libmaxminddb luci-app-log-viewer
+          V: s
+
+      - name: Collect release assets
+        shell: bash
+        env:
+          FAMILY: ${{ matrix.family }}
+          EXT: ${{ matrix.ext }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          APP="$(find artifacts/bin/packages -type f -name "luci-app-log-viewer-*.${EXT}" -print -quit)"
+          LIB="$(find artifacts/bin/packages -type f -name "libmaxminddb-*.${EXT}" -print -quit)"
+          test -n "$APP" || { echo 'Could not find built luci-app-log-viewer package'; find artifacts -type f; exit 1; }
+          test -n "$LIB" || { echo 'Could not find built libmaxminddb package'; find artifacts -type f; exit 1; }
+          cp "$APP" "dist/reffix-luci-app-log-viewer-openwrt-${FAMILY}.${EXT}"
+          cp "$LIB" "dist/reffix-libmaxminddb-openwrt-${FAMILY}.${EXT}"
+          (cd dist && sha256sum "reffix-luci-app-log-viewer-openwrt-${FAMILY}.${EXT}" "reffix-libmaxminddb-openwrt-${FAMILY}.${EXT}" > "SHA256SUMS-openwrt-${FAMILY}.txt")
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-packages-${{ matrix.family }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish-release:
+    if: "startsWith(github.event.head_commit.message, 'release: v')"
+    needs: build-packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download built assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: openwrt-packages-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release with APK/IPK assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUBJECT="$(git log -1 --format=%s "$GITHUB_SHA")"
+          TAG="${SUBJECT#release: }"
+          case "$TAG" in v*) ;; *) echo "Release commit must start with 'release: v'" >&2; exit 1 ;; esac
+          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          # REFFIX luci-app-log ${TAG}
+
+          Standalone package release for OpenWrt routers with the aarch64_cortex-a53 package architecture, including GL.iNet Flint4 / MediaTek Filogic.
+
+          ## Assets
+          - OpenWrt 25.12 APK package and matching libmaxminddb dependency.
+          - OpenWrt 24.10 IPK package and matching libmaxminddb dependency.
+          - SHA-256 checksums for both package pairs.
+
+          The app package includes the original System Log and Kernel Log pages plus the Firewall Log add-on. It uses the existing package name, so it upgrades/replaces an existing luci-app-log-viewer installation in place; uninstalling first is not required.
+
+          This build is automated and source-validated. Router-side testing is still recommended before production deployment. GeoLite2 databases are downloaded separately at install time and are not bundled.
+          EOF
+          gh release create "$TAG" dist/* --target "$GITHUB_SHA" --prerelease --title "$TAG - REFFIX LuCI Firewall Log" --notes-file "$RUNNER_TEMP/release-notes.md"
