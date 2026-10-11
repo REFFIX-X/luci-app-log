@@ -1,11 +1,11 @@
 # Changelog
 
-## v1.5.0-r7 - 2026-10-11
+## v1.5.0-r8 - 2026-10-11
 
-- Add a general-purpose Firewall Log view for selected infrastructure-port log entries and kernel firewall DROP/REJECT records.
-- Add local GeoLite2 Country and ASN enrichment, country flags, service/port labels, filters, search and CSV export.
-- Add installer and uninstaller scripts for the source overlay.
-- Document direct GitHub install steps, GeoIP setup, licensing and package-build limitations.
-- Bump OpenWrt package release to 7.
+- Build a complete `luci-app-log-viewer` APK/IPK package that includes all original log pages and the REFFIX Firewall Log.
+- Add a matching `libmaxminddb` package to releases so local GeoIP does not rely on an unrelated package feed.
+- Add a one-line online installer that detects APK/opkg and upgrades the existing app package in place.
+- Automate package builds and GitHub release assets for OpenWrt 25.12 (APK) and 24.10 (IPK) on `aarch64_cortex-a53`.
+- Publish SHA-256 checksums and clarify package installation in the README.
 
-This is a source-only pre-release on GitHub. No prebuilt APK/IPK is attached yet, and router-side compatibility testing is still required.
+This release uses the existing package name, so an already installed `luci-app-log-viewer` is upgraded/replaced rather than kept as a second required package. Router-side testing is still recommended.
