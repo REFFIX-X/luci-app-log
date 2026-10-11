@@ -9,4 +9,4 @@
 - Publish SHA-256 checksums and document installation and upgrade behaviour.
 - Fix the bundled libmaxminddb build recipe and executable permissions for the GeoIP helper scripts.
 
-The package name remains `luci-app-log-viewer`, so an existing installation is upgraded/replaced in place. Router-side testing is still recommended.
+The package name remains `luci-app-log-viewer`, so an existing installation is upgraded/replaced in place. The release workflow checks for both the APK and IPK assets before publishing; router-side testing is still recommended.
