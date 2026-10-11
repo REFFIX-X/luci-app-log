@@ -70,7 +70,7 @@ if ! fetch "https://raw.githubusercontent.com/${REPO}/package-assets/latest" "$V
   echo "ERROR: couldn't read the direct-download package index from GitHub." >&2
   exit 1
 fi
-VERSION="$(sed -n '1{s/[[:space:]]*$//;p;}' "$VERSION_FILE" | tr -d '\\r')"
+VERSION="$(sed -n '1p' "$VERSION_FILE")"
 case "$VERSION" in
   v[0-9]*) ;;
   *) echo "ERROR: package mirror returned an invalid release version: ${VERSION:-empty}." >&2; exit 1 ;;
