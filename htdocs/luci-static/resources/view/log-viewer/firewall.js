@@ -84,8 +84,15 @@ function parseLine(line, index) {
 }
 
 function countryFlag(code) {
-  if (!/^[A-Z]{2}$/.test(code || '')) return '🌐';
-  return String.fromCodePoint.apply(null, code.split('').map(c => 127397 + c.charCodeAt(0)));
+  if (!/^[A-Z]{2}$/.test(code || ''))
+    return '<span class="fw-flag-fallback" title="Country unavailable">🌐</span>';
+
+  // Windows and some Linux fonts render Unicode regional-indicator pairs as
+  // letters instead of visible national flags. Use small flag images so the
+  // appearance is consistent across browsers and operating systems.
+  return '<img class="fw-flag-img" src="https://flagcdn.com/w20/' +
+    code.toLowerCase() + '.png" alt="' + esc(code) +
+    '" width="20" loading="lazy" decoding="async" referrerpolicy="no-referrer">';
 }
 
 return view.extend({
@@ -188,7 +195,9 @@ return view.extend({
     document.head.appendChild(E('style', {type: 'text/css'},
       '.fw-toolbar{display:flex;gap:.6em;flex-wrap:wrap;align-items:center;margin:.8em 0}' +
       '.fw-toolbar input,.fw-toolbar select{min-width:10em}' +
-      '.fw-flag{display:inline-block;min-width:1.45em;margin-right:.18em;font-family:"Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji","Twitter Color Emoji",emoji,sans-serif;font-size:1.15em;font-variant-emoji:emoji;line-height:1;vertical-align:-.1em}' +
+      '.fw-flag{display:inline-flex;min-width:22px;height:16px;margin-right:.25em;align-items:center;justify-content:center;vertical-align:middle}' +
+      '.fw-flag-img{display:block;width:20px;max-height:15px;height:auto;object-fit:contain;border:1px solid rgba(127,127,127,.45);border-radius:2px}' +
+      '.fw-flag-fallback{font-size:1.1em;line-height:1}' +
       '.fw-stats{display:grid;grid-template-columns:repeat(4,minmax(8em,1fr));gap:.7em;margin:1em 0}' +
       '.fw-stat{border:1px solid var(--border-color,#444);border-radius:8px;padding:1em;background:var(--background-color-secondary,#222)}' +
       '.fw-stat span{display:block;font-size:.75em;opacity:.7;letter-spacing:.06em}.fw-stat strong{font-size:1.5em}' +
