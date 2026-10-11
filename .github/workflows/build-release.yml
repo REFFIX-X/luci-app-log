@@ -53,8 +53,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          APP="$(find artifacts/bin/packages -type f -name "luci-app-log-viewer-*.${EXT}" -print -quit)"
-          LIB="$(find artifacts/bin/packages -type f -name "libmaxminddb-*.${EXT}" -print -quit)"
+          APP="$(find artifacts/bin/packages -type f -name "luci-app-log-viewer*.${EXT}" -print -quit)"
+          LIB="$(find artifacts/bin/packages -type f -name "libmaxminddb*.${EXT}" -print -quit)"
           test -n "$APP" || { echo 'Could not find built luci-app-log-viewer package'; find artifacts -type f; exit 1; }
           test -n "$LIB" || { echo 'Could not find built libmaxminddb package'; find artifacts -type f; exit 1; }
           cp "$APP" "dist/reffix-luci-app-log-viewer-openwrt-${FAMILY}.${EXT}"
