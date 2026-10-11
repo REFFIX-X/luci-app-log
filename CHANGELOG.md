@@ -1,10 +1,9 @@
 # Changelog
 
-## v1.5.0-r24 - 2026-10-11
+## v1.5.0-r25 - 2026-10-11
 
-- Finish the dashboard visual styling: responsive insights cards, list rows, scan signal badges, policy notes and six responsive KPI cards.
-- Ensure the red Blocked badge is styled separately from the amber Observed badge and green explicit Allowed badge.
-- Improve paused-refresh status feedback after a manual refresh.
-- Includes r23 time filters, pause/resume, top sources/ports/ASNs, scan/burst heuristics, optional local policy labels, copy-IP action and richer CSV.
+- Prevent out-of-order GitHub Actions builds from downgrading the direct-download `package-assets/latest` marker.
+- Include dashboard enhancements from r24/r23: time windows, pause/resume, top source/port/ASN summaries, scan/burst signals, policy-aware labels, explicit verdict semantics, copy-IP and richer CSV.
+- Bundle local country flags, fix ISO code case handling, and keep GeoLite2 updater validation safe.
 
 Targets: OpenWrt 25.12 APK and OpenWrt 24.10 IPK for `aarch64_cortex-a53`.
