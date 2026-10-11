@@ -282,7 +282,7 @@ return view.extend({
       '<div class="fw-insight"><h3>Top ASNs</h3>' + topAsns + '</div>' +
       '<div class="fw-insight"><h3>Scan / burst signals</h3><p class="fw-muted">Heuristic only: 8+ ports or 25+ events from one public source.</p>' + scanHtml + '</div>' +
       '<div class="fw-insight fw-insight-policy"><h3>Policy context</h3><p class="fw-muted">' + esc(policyNotes) + '</p>' +
-      '<p class="fw-muted">Observed ≠ allowed. Blocked and Allowed require explicit log evidence; default-deny policy isn't inferred from silence.</p></div>';
+      '<p class="fw-muted">Observed ≠ allowed. Blocked and Allowed require explicit log evidence; default-deny policy cannot be inferred from silence.</p></div>';
   },
 
 
