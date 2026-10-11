@@ -21,7 +21,7 @@ On a supported Flint4 / aarch64 Cortex-A53 router, connect over SSH as root and 
 uclient-fetch -qO- https://raw.githubusercontent.com/REFFIX-X/luci-app-log/master/install-online.sh | sh
 ```
 
-The installer detects `apk` versus `opkg`, downloads the newest GitHub release, installs the matching `libmaxminddb` helper package and complete REFFIX LuCI package, attempts to download the GeoLite2 databases, and restarts `rpcd`.
+The installer detects `apk` versus `opkg`, reads the current package tag from the direct-download package mirror, installs the matching `libmaxminddb` helper package and complete REFFIX LuCI package, attempts to download the GeoLite2 databases, and restarts `rpcd`.
 
 Current published package targets are **OpenWrt 25.12 (APK)** and **OpenWrt 24.10 (IPK)**, built for package architecture `aarch64_cortex-a53` (including the Flint4 / MediaTek Filogic target). Other CPU architectures are rejected by the installer rather than being given the wrong library binary.
 
