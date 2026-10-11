@@ -7,7 +7,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-log-viewer
 PKG_VERSION:=1.5.0
-PKG_RELEASE:=13
+PKG_RELEASE:=14
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=REFFIX
 
@@ -26,6 +26,9 @@ endef
 define Package/luci-app-log-viewer/description
  REFFIX fork of luci-app-log-viewer with System Log, Kernel Log,
  Firewall Log and optional local GeoLite2 Country/ASN enrichment.
+endef
+
+define Build/Compile
 endef
 
 define Package/luci-app-log-viewer/install
