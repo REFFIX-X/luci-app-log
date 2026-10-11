@@ -1,6 +1,32 @@
 #!/bin/sh
-# Local MaxMind GeoLite2 lookup. Requires libmaxminddb (mmdblookup).
+# Local MaxMind GeoLite2 lookup and database status. Requires libmaxminddb (mmdblookup).
 set -e
+country_db="${GEOIP_DB_DIR:-/usr/share/GeoIP}/GeoLite2-Country.mmdb"
+asn_db="${GEOIP_DB_DIR:-/usr/share/GeoIP}/GeoLite2-ASN.mmdb"
+
+if [ "$#" -eq 1 ] && [ "$1" = "--status" ]; then
+  available=false
+  age_days=null
+  stale=false
+  if [ -s "$country_db" ] && [ -s "$asn_db" ] && command -v mmdblookup >/dev/null 2>&1; then
+    country_time="$(stat -c %Y "$country_db" 2>/dev/null || echo 0)"
+    asn_time="$(stat -c %Y "$asn_db" 2>/dev/null || echo 0)"
+    case "$country_time" in ''|*[!0-9]*) country_time=0 ;; esac
+    case "$asn_time" in ''|*[!0-9]*) asn_time=0 ;; esac
+    older_time="$country_time"
+    [ "$asn_time" -ge "$older_time" ] || older_time="$asn_time"
+    now="$(date +%s 2>/dev/null || echo 0)"
+    case "$older_time:$now" in *[!0-9:]*|:*) older_time=0 ;; esac
+    if [ "$older_time" -gt 0 ] && [ "$now" -ge "$older_time" ]; then
+      age_days=$(( (now - older_time) / 86400 ))
+      [ "$age_days" -le 45 ] || stale=true
+    fi
+    available=true
+  fi
+  printf '{"available":%s,"age_days":%s,"stale":%s}\n' "$available" "$age_days" "$stale"
+  exit 0
+fi
+
 if [ "$#" -ne 2 ] || [ "$1" != "--json" ]; then
   echo '{"error":"usage: flint4-geoip --json IP"}'
   exit 2
@@ -8,8 +34,6 @@ fi
 ip="$2"
 case "$ip" in *[!0-9a-fA-F:.]*) echo '{"error":"invalid IP"}'; exit 2;; esac
 
-country_db=/usr/share/GeoIP/GeoLite2-Country.mmdb
-asn_db=/usr/share/GeoIP/GeoLite2-ASN.mmdb
 cc=""
 country=""
 asn=""

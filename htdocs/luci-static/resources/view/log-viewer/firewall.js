@@ -27,6 +27,12 @@ function esc(value) {
   });
 }
 
+function csvCell(value) {
+  let text = String(value == null ? '' : value);
+  if (/^[\t\r\n ]*[=+\-@]/.test(text)) text = "'" + text;
+  return '"' + text.replace(/"/g, '""') + '"';
+}
+
 function isPublic(ip) {
   if (!ip || ip === '-' || ip === '0.0.0.0') return false;
   if (ip.indexOf(':') >= 0) {
@@ -86,6 +92,7 @@ function parseLine(line, index) {
 
   return {
     id: index,
+    rawLine: line,
     timestamp: timestamp || 'Recent',
     timestampMs: Number.isFinite(timestampMs) ? timestampMs : null,
     kind: kind,
@@ -125,6 +132,7 @@ return view.extend({
   title: _('Firewall Log'),
   events: [],
   geoCache: {},
+  geoCacheAt: {},
   kindFilter: 'all',
   protoFilter: 'all',
   timeFilter: 'all',
@@ -132,6 +140,14 @@ return view.extend({
   policyRules: [],
   policyRulesLoaded: false,
   maxEntries: 500,
+  sourceLineCount: 0,
+  lastCollectedAt: 0,
+  lastRawData: null,
+  geoStatus: null,
+  geoStatusCheckedAt: 0,
+  showReputation: false,
+  filterPresets: [],
+  refreshGeneration: 0,
 
   getLogData: function() {
     // Fetch a bounded tail and filter in JavaScript. The -e regex syntax in
@@ -153,6 +169,84 @@ return view.extend({
     }
     catch (e) {
       this.policyRules = [];
+    }
+  },
+
+  loadPreferences: function() {
+    try {
+      this.showReputation = localStorage.getItem('reffix-log-viewer.external-reputation') === 'true';
+      const presets = JSON.parse(localStorage.getItem('reffix-log-viewer.filters') || '[]');
+      this.filterPresets = Array.isArray(presets) ? presets.filter(p =>
+        p && typeof p.name === 'string' && typeof p.query === 'string' &&
+        ['all', 'blocked', 'observed', 'allowed'].includes(p.kind) &&
+        ['all', 'tcp', 'udp'].includes(p.proto) &&
+        ['all', '5m', '15m', '1h', '6h', '24h'].includes(p.window)
+      ).slice(0, 20) : [];
+    }
+    catch (e) {
+      this.showReputation = false;
+      this.filterPresets = [];
+    }
+  },
+
+  saveFilterPreset: function() {
+    const name = prompt(_('Name this filter preset'));
+    if (!name || !name.trim()) return;
+    const preset = {
+      name: name.trim().slice(0, 40),
+      query: this.search.value || '',
+      kind: this.kind.value,
+      proto: this.proto.value,
+      window: this.window.value
+    };
+    this.filterPresets = this.filterPresets.filter(p => p.name !== preset.name);
+    this.filterPresets.unshift(preset);
+    this.filterPresets = this.filterPresets.slice(0, 20);
+    try {
+      localStorage.setItem('reffix-log-viewer.filters', JSON.stringify(this.filterPresets));
+      this.renderPresetOptions();
+      this.presets.value = preset.name;
+    }
+    catch (e) {
+      ui.addNotification(null, E('p', _('Unable to save filter presets in this browser.')), 'warning');
+    }
+  },
+
+  renderPresetOptions: function() {
+    if (!this.presets) return;
+    this.presets.replaceChildren(E('option', {value: ''}, _('Saved filters')));
+    this.filterPresets.forEach(p => this.presets.appendChild(E('option', {value: p.name}, p.name)));
+  },
+
+  applyFilterPreset: function(name) {
+    const preset = this.filterPresets.find(p => p.name === name);
+    if (!preset) return;
+    this.search.value = preset.query;
+    this.kind.value = this.kindFilter = preset.kind;
+    this.proto.value = this.protoFilter = preset.proto;
+    this.window.value = this.timeFilter = preset.window;
+    this.maxEntries = 500;
+    this.renderRows();
+    this.renderInsightsPanel();
+  },
+
+  removeFilterPreset: function() {
+    const name = this.presets.value;
+    if (!name) return;
+    this.filterPresets = this.filterPresets.filter(p => p.name !== name);
+    try {
+      localStorage.setItem('reffix-log-viewer.filters', JSON.stringify(this.filterPresets));
+    }
+    catch (e) {}
+    this.renderPresetOptions();
+  },
+
+  loadGeoStatus: async function() {
+    try {
+      this.geoStatus = JSON.parse(await fs.exec_direct('/usr/bin/flint4-geoip', ['--status'], 'text'));
+    }
+    catch (e) {
+      this.geoStatus = {available: false};
     }
   },
 
@@ -289,15 +383,19 @@ return view.extend({
 
   lookupGeo: async function(ip) {
     if (!isPublic(ip)) return {};
-    if (Object.prototype.hasOwnProperty.call(this.geoCache, ip)) return this.geoCache[ip];
+    if (Object.prototype.hasOwnProperty.call(this.geoCache, ip) &&
+        (Object.keys(this.geoCache[ip]).length || Date.now() - (this.geoCacheAt[ip] || 0) < 5 * 60 * 1000))
+      return this.geoCache[ip];
     try {
       const raw = await fs.exec_direct('/usr/bin/flint4-geoip', ['--json', ip], 'text');
       const data = JSON.parse(raw || '{}');
-      this.geoCache[ip] = data;
+      this.geoCache[ip] = data.error ? {} : data;
+      this.geoCacheAt[ip] = Date.now();
       return data;
     }
     catch (e) {
       this.geoCache[ip] = {};
+      this.geoCacheAt[ip] = Date.now();
       return {};
     }
   },
@@ -309,29 +407,64 @@ return view.extend({
   },
 
   refreshEvents: async function() {
+    const generation = ++this.refreshGeneration;
     await this.loadPolicyRules();
     const raw = await this.getLogData();
-    const lines = (raw || '').trim().split('\n');
-    this.events = lines.map((line, i) => parseLine(line, i + 1))
-      .filter(Boolean).map(e => this.applyPolicy(e)).slice(-MAX_LINES).reverse();
-    await this.enrich(this.events.slice(0, 60));
+    if (generation !== this.refreshGeneration) return;
+    const text = raw || '';
+    this.sourceLineCount = text ? text.split('\n').filter(Boolean).length : 0;
+    this.lastCollectedAt = Date.now();
+    const changed = text !== this.lastRawData;
+    if (changed) {
+      this.lastRawData = text;
+      const lines = text.trim() ? text.trim().split('\n') : [];
+      this.events = lines.map((line, i) => parseLine(line, i + 1))
+        .filter(Boolean).map(e => this.applyPolicy(e)).slice(-MAX_LINES).reverse();
+    }
     this.statusText.textContent = this.paused
       ? _('Auto-refresh paused · manually refreshed at ') + (new Date()).toLocaleTimeString()
       : _('Live · updated ') + (new Date()).toLocaleTimeString();
-    this.renderRows();
+    this.logStatus.textContent = _('Read ') + this.sourceLineCount + _(' of up to ') + MAX_LINES +
+      _(' recent log lines · collected ') + new Date(this.lastCollectedAt).toLocaleString();
+    if (changed) {
+      this.renderRows();
+      this.renderInsightsPanel();
+      // Draw the log immediately. GeoIP is checked before starting lookups so a missing database
+      // does not spawn a failed mmdblookup process for every address on every refresh.
+    }
+    if (!this.geoStatusCheckedAt || Date.now() - this.geoStatusCheckedAt > 5 * 60 * 1000) {
+      this.geoStatusCheckedAt = Date.now();
+      this.loadGeoStatus().then(() => {
+        this.renderGeoStatus();
+        if (changed && this.geoStatus && this.geoStatus.available) this.enrichAndRender();
+      });
+    }
+    else if (changed && this.geoStatus && this.geoStatus.available) this.enrichAndRender();
   },
 
-  renderRows: function() {
-    if (!this.tbody) return;
-    const query = (this.search.value || '').toLowerCase();
+  enrichAndRender: function() {
+    if (!this.tbody || !this.tbody.isConnected) return;
+    this.enrich(this.events.slice(0, 60)).then(() => {
+      if (this.tbody && this.tbody.isConnected) {
+        this.renderRows();
+        this.renderInsightsPanel();
+      }
+    });
+  },
+
+  getWindowedEvents: function() {
     const windowMs = this.getTimeWindowMs();
     const now = Date.now();
-    const windowed = this.events.filter(e => {
+    return this.events.filter(e => {
       if (!windowMs || !e.timestampMs) return true;
       const age = now - e.timestampMs;
       return age >= -60000 && age <= windowMs;
     });
-    const matching = windowed.filter(e => {
+  },
+
+  getMatchingEvents: function(windowed) {
+    const query = (this.search.value || '').toLowerCase();
+    return (windowed || this.getWindowedEvents()).filter(e => {
       const geo = this.geoCache[e.source] || {};
       const searchable = [
         e.timestamp, e.kind, e.source, e.destination, e.dport, e.service,
@@ -342,19 +475,47 @@ return view.extend({
         (this.protoFilter === 'all' || e.protocol.toLowerCase() === this.protoFilter) &&
         searchable.includes(query);
     });
+  },
+
+  renderInsightsPanel: function() {
+    if (this.insights) this.insights.innerHTML = this.renderInsights(this.getWindowedEvents());
+  },
+
+  renderGeoStatus: function() {
+    if (!this.geoStatusText) return;
+    if (!this.geoStatus || !this.geoStatus.available) {
+      this.geoStatusText.textContent = _('GeoIP unavailable · country and ASN details hidden');
+      return;
+    }
+    const age = this.geoStatus.age_days == null ? _('age unknown') : this.geoStatus.age_days + _(' days old');
+    this.geoStatusText.textContent = _('Local GeoIP databases · oldest ') + age +
+      (this.geoStatus.stale ? _(' · update recommended') : '');
+  },
+
+  renderRows: function() {
+    if (!this.tbody) return;
+    const windowed = this.getWindowedEvents();
+    const matching = this.getMatchingEvents(windowed);
+    this.filteredEvents = matching;
     const events = matching.slice(0, this.maxEntries);
-    const blocked = matching.filter(e => e.kind === 'Blocked').length;
-    const observed = matching.filter(e => e.kind === 'Observed').length;
-    const allowed = matching.filter(e => e.kind === 'Allowed').length;
-    const uniqueSources = new Set(matching.map(e => e.source).filter(Boolean)).size;
-    const countries = new Set(matching.map(e => (this.geoCache[e.source] || {}).country_code).filter(Boolean)).size;
+    let blocked = 0, observed = 0, allowed = 0;
+    const uniqueSources = new Set();
+    const countries = new Set();
+    matching.forEach(e => {
+      if (e.kind === 'Blocked') blocked++;
+      else if (e.kind === 'Observed') observed++;
+      else if (e.kind === 'Allowed') allowed++;
+      if (e.source) uniqueSources.add(e.source);
+      const country = (this.geoCache[e.source] || {}).country_code;
+      if (country) countries.add(country);
+    });
     this.stats.innerHTML = [
       ['MATCHING EVENTS', matching.length],
-      ['UNIQUE SOURCES', uniqueSources],
+      ['UNIQUE SOURCES', uniqueSources.size],
       ['BLOCKED', blocked],
       ['OBSERVED · VERDICT UNKNOWN', observed],
       ['ALLOWED · EXPLICIT LOGS', allowed],
-      ['COUNTRIES', countries]
+      ['COUNTRIES', countries.size]
     ].map(function(item) {
       return '<div class="fw-stat"><span>' + item[0] + '</span><strong>' + item[1] + '</strong></div>';
     }).join('');
@@ -378,15 +539,19 @@ return view.extend({
         '<td class="td"><span class="fw-badge ' + kindClass + '" title="' + esc(title) + '">' + esc(e.kind) + '</span><small class="fw-event-policy">' + esc(policyText || '—') + '</small></td>' +
         '<td class="td fw-detail">SPT ' + esc(e.sport || '—') + ' · ' + esc(e.flags || '—') +
           '<small>' + esc(e.iface || '—') + (e.ttl ? ' · TTL ' + esc(e.ttl) : '') + (e.policyNote ? ' · ' + esc(e.policyNote) : '') + '</small></td>' +
-        '<td class="td"><a href="https://www.abuseipdb.com/check/' + encodeURIComponent(e.source) +
-          '" target="_blank" rel="noreferrer">Reputation ↗</a></td></tr>';
+        '<td class="td"><button type="button" class="cbi-button fw-event-details" data-id="' + e.id + '">' + esc(_('Details')) + '</button>' +
+          (this.showReputation ? '<a class="fw-reputation" href="https://www.abuseipdb.com/check/' + encodeURIComponent(e.source) +
+            '" target="_blank" rel="noreferrer" title="' + esc(_('Opens AbuseIPDB and shares this source IP with that service')) + '">' + esc(_('AbuseIPDB ↗')) + '</a>' :
+            '<small class="fw-muted">' + esc(_('External lookup hidden')) + '</small>') + '</td></tr>';
     }).join('') || '<tr><td colspan="8" class="center">No matching events in the selected window. Only explicitly logged DROP/REJECT/BLOCK and ALLOW/ACCEPT markers can prove a verdict.</td></tr>';
     this.counter.textContent = events.length + ' shown · ' + matching.length + ' matched · ' + windowed.length + ' in window · ' + this.events.length + ' loaded';
-    if (this.insights) this.insights.innerHTML = this.renderInsights(windowed);
+    this.loadMoreButton.hidden = events.length >= matching.length;
+    this.loadMoreButton.textContent = _('Load 500 more') + ' · ' + (matching.length - events.length) + _(' remaining');
   },
 
   render: function() {
-    document.head.appendChild(E('style', { type: 'text/css' }, `
+    this.loadPreferences();
+    if (!document.getElementById('reffix-firewall-log-style')) document.head.appendChild(E('style', { id: 'reffix-firewall-log-style', type: 'text/css' }, `
       .fw-shell {
         --mp-bg: #2D2A2E;
         --mp-panel: #221F22;
@@ -599,6 +764,16 @@ return view.extend({
         white-space: nowrap;
       }
       .fw-shell .fw-insight-policy { grid-column: 1 / -1; }
+      .fw-shell .fw-status-row { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--mp-muted); font-size: 12px; }
+      .fw-shell .fw-privacy { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0; color: var(--mp-muted); font-size: 12px; }
+      .fw-shell .fw-privacy input { margin-top: 3px; }
+      .fw-shell .fw-load-more { display: block; width: 100%; margin-top: 10px; }
+      .fw-shell .fw-event-details { margin-right: 8px; }
+      .fw-shell .fw-reputation { display: inline-block; margin-top: 8px; }
+      .fw-event-meta { display: grid; grid-template-columns: minmax(100px, auto) minmax(0, 1fr); gap: 6px 12px; }
+      .fw-event-meta dt { font-weight: 700; }
+      .fw-event-meta dd { margin: 0; overflow-wrap: anywhere; }
+      .fw-raw-log { max-height: 30vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
       .fw-shell .fw-event-policy {
         display: block;
         max-width: 18em;
@@ -770,8 +945,26 @@ return view.extend({
       E('option', {value: '6h'}, _('Last 6 hours')),
       E('option', {value: '24h'}, _('Last 24 hours'))
     ]);
+    this.presets = E('select', {class: 'cbi-input-select', title: _('Browser-local saved filter presets')});
+    this.renderPresetOptions();
     this.counter = E('span', {class: 'right'});
     this.statusText = E('span', {class: 'fw-muted'});
+    this.logStatus = E('span', {class: 'fw-muted'});
+    this.geoStatusText = E('span', {class: 'fw-muted'});
+    this.reputationCheckbox = E('input', {type: 'checkbox', change: ev => {
+        this.showReputation = ev.target.checked;
+        try { localStorage.setItem('reffix-log-viewer.external-reputation', String(this.showReputation)); } catch (e) {}
+        this.renderRows();
+      }});
+    this.reputationCheckbox.checked = this.showReputation;
+    this.reputationToggle = E('label', {class: 'fw-privacy'}, [
+      this.reputationCheckbox,
+      E('span', {}, _('Show AbuseIPDB links (opening one shares its source IP with that service)'))
+    ]);
+    this.loadMoreButton = E('button', {class: 'cbi-button fw-load-more', hidden: true, click: () => {
+      this.maxEntries += 500;
+      this.renderRows();
+    }}, _('Load 500 more'));
     this.pauseButton = E('button', {class: 'cbi-button', click: () => {
       this.paused = !this.paused;
       this.pauseButton.textContent = this.paused ? _('Resume live') : _('Pause live');
@@ -792,17 +985,30 @@ return view.extend({
       this.stats,
       E('div', {class: 'fw-toolbar'}, [
         this.search, this.kind, this.proto, this.window,
+        this.presets,
+        E('button', {class: 'cbi-button', click: () => this.saveFilterPreset()}, _('Save filter')),
+        E('button', {class: 'cbi-button', click: () => this.removeFilterPreset()}, _('Delete saved filter')),
         E('button', {class: 'cbi-button cbi-button-action', click: () => this.refreshEvents().catch(e => ui.addNotification(null, E('p', e.message), 'error'))}, _('Refresh')),
         this.pauseButton,
-        E('button', {class: 'cbi-button', click: () => this.exportCSV()}, _('Export CSV')),
+        E('button', {class: 'cbi-button', click: () => this.exportCSV(false)}, _('Export filtered CSV')),
+        E('button', {class: 'cbi-button', click: () => this.exportCSV(true)}, _('Export all loaded')),
         this.counter,
         this.statusText
       ]),
+      E('div', {class: 'fw-status-row'}, [this.logStatus, this.geoStatusText]),
+      this.reputationToggle,
       this.insights,
-      E('div', {class: 'fw-tablewrap'}, table)
+      E('div', {class: 'fw-tablewrap'}, table),
+      this.loadMoreButton
     ]);
 
     this.tbody.addEventListener('click', async ev => {
+      const detailButton = ev.target.closest('.fw-event-details');
+      if (detailButton) {
+        const event = this.events.find(item => String(item.id) === detailButton.getAttribute('data-id'));
+        if (event) this.showEventDetails(event);
+        return;
+      }
       const button = ev.target.closest('.fw-copy-ip');
       if (!button) return;
       const ip = button.getAttribute('data-ip') || '';
@@ -816,10 +1022,22 @@ return view.extend({
         ui.addNotification(null, E('p', _('Could not copy automatically. Select the IP text manually.')), 'warning');
       }
     });
-    this.search.addEventListener('input', () => this.renderRows());
-    this.kind.addEventListener('change', () => { this.kindFilter = this.kind.value; this.renderRows(); });
-    this.proto.addEventListener('change', () => { this.protoFilter = this.proto.value; this.renderRows(); });
-    this.window.addEventListener('change', () => { this.timeFilter = this.window.value; this.renderRows(); });
+    this.search.addEventListener('input', () => {
+      clearTimeout(this.searchTimer);
+      this.searchTimer = setTimeout(() => {
+        this.maxEntries = 500;
+        this.renderRows();
+      }, 120);
+    });
+    this.kind.addEventListener('change', () => { this.kindFilter = this.kind.value; this.maxEntries = 500; this.renderRows(); });
+    this.proto.addEventListener('change', () => { this.protoFilter = this.proto.value; this.maxEntries = 500; this.renderRows(); });
+    this.window.addEventListener('change', () => {
+      this.timeFilter = this.window.value;
+      this.maxEntries = 500;
+      this.renderRows();
+      this.renderInsightsPanel();
+    });
+    this.presets.addEventListener('change', () => this.applyFilterPreset(this.presets.value));
     this.statusText.textContent = _('Auto-refresh every 15s');
     this.refreshEvents().catch(e => ui.addNotification(null, E('p', _('Unable to load firewall events: ') + e.message), 'error'));
     this.timer = setInterval(() => {
@@ -829,20 +1047,45 @@ return view.extend({
     return result;
   },
 
-  exportCSV: function() {
+  showEventDetails: function(event) {
+    const geo = this.geoCache[event.source] || {};
+    const rows = [
+      ['Time', event.timestamp], ['Verdict', event.kind], ['Source IP', event.source],
+      ['Country', geo.country_name || 'GeoIP unavailable'], ['ASN', geo.asn_organization || '—'],
+      ['Destination IP', event.destination], ['Protocol', event.protocol],
+      ['Source port', event.sport], ['Destination port', event.dport], ['Service', event.service],
+      ['Interface', event.iface], ['TTL', event.ttl], ['Flags', event.flags],
+      ['Log marker', event.marker], ['Event prefix', event.prefix],
+      ['Policy label', event.policyLabel], ['Policy note', event.policyNote]
+    ];
+    ui.showModal(_('Firewall event details'), [
+      E('dl', {class: 'fw-event-meta'}, rows.flatMap(row => [
+        E('dt', {}, _(row[0])), E('dd', {}, String(row[1] == null || row[1] === '' ? '—' : row[1]))
+      ])),
+      E('h3', {}, _('Original log line')),
+      E('pre', {class: 'fw-raw-log'}, event.rawLine || '')
+    ], [E('button', {class: 'cbi-button cbi-button-action important', click: ui.hideModal}, _('Close'))]);
+  },
+
+  exportCSV: function(allLoaded) {
     const rows = [['Time','Source IP','Country','ASN','Destination IP','Destination Port','Service','Protocol','Verdict','Log Marker','Policy Label','Policy Note','Source Port','Interface']];
-    this.events.forEach(e => {
+    const events = allLoaded ? this.events : this.getMatchingEvents();
+    events.forEach(e => {
       const geo = this.geoCache[e.source] || {};
       rows.push([e.timestamp,e.source,geo.country_name || '',geo.asn_organization || '',e.destination,e.dport,e.service,e.protocol,e.kind,e.marker || e.prefix,e.policyLabel || '',e.policyNote || '',e.sport,e.iface]);
     });
-    const csv = rows.map(r => r.map(v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"').join(',')).join('\r\n');
+    const csv = rows.map(r => r.map(csvCell).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], {type: 'text/csv;charset=utf-8'}));
-    const link = E('a', {href: url, download: 'firewall-log.csv'});
+    const link = E('a', {href: url, download: allLoaded ? 'firewall-log-all-loaded.csv' : 'firewall-log-filtered.csv'});
     link.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   },
 
   remove: function() {
     if (this.timer) clearInterval(this.timer);
+    if (this.searchTimer) clearTimeout(this.searchTimer);
+    this.refreshGeneration++;
+    this.tbody = null;
+    this.insights = null;
   }
 });

@@ -7,7 +7,7 @@ REFFIX-maintained LuCI log viewer for OpenWrt, including System Log, Kernel Log,
 - Firewall events classified only from explicit log evidence: blocked, observed, or explicitly allowed.
 - Search and filters for addresses, ports, protocol, country and ASN.
 - Local GeoLite2 country/ASN lookup; no per-IP web lookup API.
-- CSV export, copyable IP addresses, recent-event summaries and scan/burst heuristics.
+- Browser-local filter presets, event details, filtered/all-loaded CSV export, copyable IP addresses, recent-event summaries and scan/burst heuristics.
 - Monokai Pro-inspired dark palette coordinated with [REFFIX Monokai Pro for LuCI](https://github.com/REFFIX-X/luci-theme-footstrap).
 - Existing package identity `luci-app-log-viewer` is retained so upgrades replace the installed app in place.
 
@@ -19,12 +19,14 @@ Connect over SSH as root:
 uclient-fetch -qO- https://raw.githubusercontent.com/REFFIX-X/luci-app-log/master/install-online.sh | sh
 ```
 
-The installer supports only OpenWrt 25.12/APK on the Flint4-class `aarch64_cortex-a53` target and downloads the matching package and GeoIP helper. It first uses the package mirror; if GitHub's raw-content host is unavailable, it falls back to the assets attached to the v2.0.0 release.
+The installer supports OpenWrt 25.12/APK and `SNAPSHOT:mediatek/filogic` on Flint4-class MediaTek Filogic routers. It checks the downloaded app and GeoIP helper against the release SHA-256 file before installing. It first uses the package mirror; if the mirror assets or checksums are unavailable or invalid, it falls back to the versioned GitHub release assets and verifies those too. A checksum mismatch on the release stops installation.
 
 Supported release assets:
 - OpenWrt 25.12, APK, `aarch64_cortex-a53` only
 
-Manual APK packages and SHA-256 checksums are published on [GitHub Releases](https://github.com/REFFIX-X/luci-app-log/releases). The matching [REFFIX Monokai Pro for LuCI theme](https://github.com/REFFIX-X/luci-theme-footstrap) has its own OpenWrt 25.12/APK release and installation guide.
+The installer also accepts the Flint 4-compatible `SNAPSHOT:mediatek/filogic` build when APK is present and its architecture is `aarch64` or `aarch64_cortex-a53`.
+
+Manual APK packages and SHA-256 checksums are published on [GitHub Releases](https://github.com/REFFIX-X/luci-app-log/releases). The Firewall Log reads at most 1,500 recent system log lines at a time and initially displays 500 matches; use **Load more** for additional rows from that loaded window. GeoIP enrichment is local and limited to the 60 most recent unique public sources. Local filter presets and the option to show external AbuseIPDB links are stored in your browser. Opening an AbuseIPDB link sends that source IP to AbuseIPDB. The matching [REFFIX Monokai Pro for LuCI theme](https://github.com/REFFIX-X/luci-theme-footstrap) has its own OpenWrt 25.12/APK release and installation guide.
 
 ## Firewall log semantics
 

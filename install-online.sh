@@ -1,5 +1,5 @@
 #!/bin/sh
-# REFFIX Log Viewer installer for OpenWrt 25.12 / APK only (Flint4 aarch64_cortex-a53).
+# REFFIX Log Viewer installer for OpenWrt 25.12 / APK (Flint4 / MediaTek Filogic).
 set -eu
 
 REPO=REFFIX-X/luci-app-log
@@ -23,8 +23,17 @@ fetch() {
   fi
 }
 
+verify_checksums() {
+  app_name="reffix-luci-app-log-viewer-openwrt-${FAMILY}.${EXT}"
+  lib_name="reffix-libmaxminddb-openwrt-${FAMILY}.${EXT}"
+  [ -s "$TMP/SHA256SUMS.txt" ] || return 1
+  grep -Fq "  $app_name" "$TMP/SHA256SUMS.txt" || return 1
+  grep -Fq "  $lib_name" "$TMP/SHA256SUMS.txt" || return 1
+  (cd "$TMP" && sha256sum -c SHA256SUMS.txt)
+}
+
 command -v apk >/dev/null 2>&1 || {
-  echo "ERROR: REFFIX Log Viewer v2 supports OpenWrt 25.12 APK only. IPK/opkg releases are no longer built." >&2
+  echo "ERROR: REFFIX Log Viewer v2 requires APK on OpenWrt 25.12 or a supported MediaTek Filogic snapshot. IPK/opkg releases are no longer built." >&2
   exit 1
 }
 if [ -r /etc/openwrt_release ]; then . /etc/openwrt_release; fi
@@ -32,7 +41,7 @@ case "${DISTRIB_RELEASE:-}:${DISTRIB_TARGET:-}" in
   25.12*:*) ;;
   SNAPSHOT:mediatek/filogic*) ;;
   *)
-    echo "ERROR: this installer is for OpenWrt 25.12 on the supported APK target. Detected release=${DISTRIB_RELEASE:-unknown}, target=${DISTRIB_TARGET:-unknown}." >&2
+    echo "ERROR: this installer is for OpenWrt 25.12 or SNAPSHOT:mediatek/filogic with APK. Detected release=${DISTRIB_RELEASE:-unknown}, target=${DISTRIB_TARGET:-unknown}." >&2
     exit 1
     ;;
 esac
@@ -59,8 +68,10 @@ fi
 if [ -n "$VERSION" ]; then
   BASE="https://raw.githubusercontent.com/${REPO}/package-assets/${VERSION}"
   echo "Using package mirror release $VERSION."
-  if ! fetch "$BASE/reffix-libmaxminddb-openwrt-${FAMILY}.${EXT}" "$TMP/lib.${EXT}" ||
-     ! fetch "$BASE/reffix-luci-app-log-viewer-openwrt-${FAMILY}.${EXT}" "$TMP/app.${EXT}"; then
+  if ! fetch "$BASE/reffix-libmaxminddb-openwrt-${FAMILY}.${EXT}" "$TMP/reffix-libmaxminddb-openwrt-${FAMILY}.${EXT}" ||
+     ! fetch "$BASE/reffix-luci-app-log-viewer-openwrt-${FAMILY}.${EXT}" "$TMP/reffix-luci-app-log-viewer-openwrt-${FAMILY}.${EXT}" ||
+     ! fetch "$BASE/SHA256SUMS-openwrt-${FAMILY}.txt" "$TMP/SHA256SUMS.txt" ||
+     ! verify_checksums; then
     echo "WARNING: package mirror download failed; trying GitHub release assets." >&2
     VERSION=""
   fi
@@ -70,22 +81,30 @@ if [ -z "$VERSION" ]; then
   VERSION="$VERSION_FALLBACK"
   BASE="https://github.com/${REPO}/releases/download/${VERSION}"
   echo "Using GitHub release asset fallback: $VERSION."
-  fetch "$BASE/reffix-libmaxminddb-openwrt-${FAMILY}.${EXT}" "$TMP/lib.${EXT}" || {
+  fetch "$BASE/reffix-libmaxminddb-openwrt-${FAMILY}.${EXT}" "$TMP/reffix-libmaxminddb-openwrt-${FAMILY}.${EXT}" || {
     echo "ERROR: couldn't download the matching GeoIP helper APK from GitHub Releases." >&2
     echo "Check connectivity to github.com and confirm release $VERSION contains the 25.12 assets." >&2
     exit 1
   }
-  fetch "$BASE/reffix-luci-app-log-viewer-openwrt-${FAMILY}.${EXT}" "$TMP/app.${EXT}" || {
+  fetch "$BASE/reffix-luci-app-log-viewer-openwrt-${FAMILY}.${EXT}" "$TMP/reffix-luci-app-log-viewer-openwrt-${FAMILY}.${EXT}" || {
     echo "ERROR: couldn't download the REFFIX Log Viewer APK from GitHub Releases." >&2
     echo "Check connectivity to github.com and confirm release $VERSION contains the 25.12 assets." >&2
     exit 1
   }
+  fetch "$BASE/SHA256SUMS-openwrt-${FAMILY}.txt" "$TMP/SHA256SUMS.txt" || {
+    echo "ERROR: couldn't download the package checksum file from GitHub Releases." >&2
+    exit 1
+  }
+  verify_checksums || {
+    echo "ERROR: APK checksum verification failed; refusing to install either package." >&2
+    exit 1
+  }
 fi
 
-echo "Installing matching GeoIP helper library..."
-apk add --allow-untrusted "$TMP/lib.${EXT}"
-echo "Installing/upgrading REFFIX Log Viewer..."
-apk add --allow-untrusted "$TMP/app.${EXT}"
+echo "Installing checksum-verified GeoIP helper and REFFIX Log Viewer..."
+apk add --allow-untrusted \
+  "$TMP/reffix-libmaxminddb-openwrt-${FAMILY}.${EXT}" \
+  "$TMP/reffix-luci-app-log-viewer-openwrt-${FAMILY}.${EXT}"
 
 if [ -x /usr/bin/flint4-geoip-update ]; then
   echo "Downloading local GeoLite2 country and ASN databases..."
