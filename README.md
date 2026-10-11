@@ -8,7 +8,7 @@ A REFFIX-maintained fork of [gSpotx2f/luci-app-log](https://github.com/gSpotx2f/
 - **Firewall Log** parses the generic `INFRA_PORT_HIT` and conventional `DROP` / `REJECT` kernel log messages.
 - Readable table with timestamp, source IP, local GeoIP country flag/name and ASN organisation, destination IP, destination port/service, protocol, event type, source port, ingress interface and TCP flags.
 - Filters for event type and TCP/UDP, search across IPs/countries/ASNs/ports/services, CSV export and periodic refresh.
-- GeoIP enrichment uses a local MaxMind GeoLite2 database. No per-IP lookup API is called.
+- GeoIP enrichment uses a local MaxMind GeoLite2 database. No per-IP lookup API is called. Country flag icons are small static images requested by ISO country code; the source IP is not sent to the flag image service.
 - Does not add or modify firewall rules.
 
 ## Installation
