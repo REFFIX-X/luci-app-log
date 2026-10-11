@@ -1,13 +1,13 @@
 #
-# REFFIX maintained fork of gSpotx2f/luci-app-log
+# REFFIX-maintained fork of gSpotx2f/luci-app-log.
 # Original application is distributed under the MIT License.
 #
 
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-log-viewer
-PKG_VERSION:=1.5.0
-PKG_RELEASE:=28
+PKG_VERSION:=2.0.0
+PKG_RELEASE:=1
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=REFFIX
 
@@ -24,8 +24,8 @@ define Package/luci-app-log-viewer
 endef
 
 define Package/luci-app-log-viewer/description
- REFFIX fork of luci-app-log-viewer with System Log, Kernel Log,
- Firewall Log and optional local GeoLite2 Country/ASN enrichment.
+ REFFIX Log Viewer v2: System Log, Kernel Log, Firewall Log and
+ optional local GeoLite2 Country/ASN enrichment.
 endef
 
 define Build/Compile
