@@ -1,9 +1,9 @@
-# REFFIX Log Viewer release pipeline: OpenWrt 25.12 / APK only.
+# REFFIX Firewall Log release pipeline: OpenWrt 25.12 / APK only.
 
 on:
   push:
     branches:
-      - master
+      - main
 
 concurrency:
   group: reffix-log-release
@@ -122,7 +122,7 @@ jobs:
           TAG="${SUBJECT#release: }"
           case "$TAG" in v*) ;; *) echo "Release commit must start with 'release: v'" >&2; exit 1 ;; esac
           cat > "$RUNNER_TEMP/release-notes.md" <<EOF
-          # REFFIX Log Viewer ${TAG}
+          # REFFIX Firewall Log ${TAG}
 
           Standalone OpenWrt packages for aarch64_cortex-a53 routers, including GL.iNet Flint4 / MediaTek Filogic.
 
@@ -137,4 +137,4 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release delete "$TAG" --yes --cleanup-tag
           fi
-          gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "$TAG - REFFIX Log Viewer" --notes-file "$RUNNER_TEMP/release-notes.md"
+          gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "$TAG - REFFIX Firewall Log" --notes-file "$RUNNER_TEMP/release-notes.md"

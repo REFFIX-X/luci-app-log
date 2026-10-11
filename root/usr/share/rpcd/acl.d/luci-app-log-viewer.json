@@ -12,29 +12,11 @@
         "/usr/sbin/logread*": [
           "exec"
         ],
-        "/bin/dmesg -r": [
-          "exec"
-        ],
         "/usr/bin/flint4-geoip": [
-          "exec"
-        ],
-        "/usr/libexec/logread-ubox*": [
           "exec"
         ],
         "/etc/log-viewer/policies.json": [
           "read"
-        ]
-      },
-      "ubus": {
-        "system": [
-          "info"
-        ],
-        "luci.log-viewer": [
-          "getSyslogSize",
-          "getSyslogHash",
-          "getDmesgSize",
-          "getDmesgHash",
-          "getLogfileSize"
         ]
       }
     }

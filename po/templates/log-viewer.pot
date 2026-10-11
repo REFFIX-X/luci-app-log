@@ -55,9 +55,6 @@ msgstr ""
 msgid "Invalid regular expression"
 msgstr ""
 
-msgid "Kernel Log"
-msgstr ""
-
 msgid "Last entries"
 msgstr ""
 
@@ -65,9 +62,6 @@ msgid "Level"
 msgstr ""
 
 msgid "Log"
-msgstr ""
-
-msgid "Log Viewer"
 msgstr ""
 
 msgid "Logging levels"
@@ -92,9 +86,6 @@ msgid "Refresh log"
 msgstr ""
 
 msgid "Sorting entries"
-msgstr ""
-
-msgid "System Log"
 msgstr ""
 
 msgid "Timestamp"

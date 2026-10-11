@@ -1,5 +1,10 @@
 # Changelog
 
+## v3.0.0
+
+- Makes Firewall Log the only page and renames the Status menu entry to Firewall Log.
+- Removes the System Log and Kernel Log views and their unused RPC access.
+
 ## v2.1.0
 
 - Verifies both APK downloads against the published SHA-256 file before package installation.

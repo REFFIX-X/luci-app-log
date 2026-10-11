@@ -65,9 +65,6 @@ msgstr "Хосты"
 msgid "Invalid regular expression"
 msgstr "Неправильное регулярное выражение"
 
-msgid "Kernel Log"
-msgstr "Журнал ядра"
-
 msgid "Last entries"
 msgstr "Последние записи"
 
@@ -76,9 +73,6 @@ msgstr "Уровень"
 
 msgid "Log"
 msgstr "Лог"
-
-msgid "Log Viewer"
-msgstr "Просмотр лога"
 
 msgid "Logging levels"
 msgstr "Уровни логирования"
@@ -103,9 +97,6 @@ msgstr "Обновить лог"
 
 msgid "Sorting entries"
 msgstr "Сортировка записей"
-
-msgid "System Log"
-msgstr "Системный журнал"
 
 msgid "Timestamp"
 msgstr "Время"

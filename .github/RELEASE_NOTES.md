@@ -17,4 +17,4 @@ This is a **source-only pre-release** of the REFFIX fork of `luci-app-log-viewer
 - The source passes automated JavaScript, shell and JSON validation, but has not yet been verified on every OpenWrt release/theme or exhaustively tested on router hardware.
 - GeoLite2 databases are downloaded separately by the helper and are not included in this release. See the README for the data source and licensing notes.
 
-Install using the source overlay steps in [README.md](https://github.com/REFFIX-X/luci-app-log/blob/master/README.md).
+Install using the source overlay steps in [README.md](https://github.com/REFFIX-X/luci-app-log/blob/main/README.md).

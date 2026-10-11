@@ -1,6 +1,6 @@
-# REFFIX Log Viewer
+# REFFIX Firewall Log
 
-REFFIX-maintained LuCI log viewer for OpenWrt, including System Log, Kernel Log, and a firewall-event dashboard with local GeoIP enrichment.
+REFFIX Firewall Log for OpenWrt LuCI, with local GeoIP enrichment.
 
 ## Highlights
 
@@ -16,7 +16,7 @@ REFFIX-maintained LuCI log viewer for OpenWrt, including System Log, Kernel Log,
 Connect over SSH as root:
 
 ```sh
-uclient-fetch -qO- https://raw.githubusercontent.com/REFFIX-X/luci-app-log/master/install-online.sh | sh
+uclient-fetch -qO- https://raw.githubusercontent.com/REFFIX-X/luci-app-log/main/install-online.sh | sh
 ```
 
 The installer supports OpenWrt 25.12/APK and `SNAPSHOT:mediatek/filogic` on Flint4-class MediaTek Filogic routers. It checks the downloaded app and GeoIP helper against the release SHA-256 file before installing. It first uses the package mirror; if the mirror assets or checksums are unavailable or invalid, it falls back to the versioned GitHub release assets and verifies those too. A checksum mismatch on the release stops installation.

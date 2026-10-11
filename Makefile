@@ -6,8 +6,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-log-viewer
-# REFFIX v2.1.0; OpenWrt 25.12 APK only
-PKG_VERSION:=2.1.0
+# REFFIX v3.0.0; OpenWrt 25.12 APK only
+PKG_VERSION:=3.0.0
 PKG_RELEASE:=1
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=REFFIX
@@ -18,15 +18,14 @@ define Package/luci-app-log-viewer
   SECTION:=luci
   CATEGORY:=LuCI
   SUBMENU:=3. Applications
-  TITLE:=REFFIX System, Kernel and Firewall Log Viewer
+  TITLE:=REFFIX Firewall Log
   URL:=https://github.com/REFFIX-X/luci-app-log
-  DEPENDS:=+ucode +ucode-mod-fs +libmaxminddb
+  DEPENDS:=+libmaxminddb
   PKGARCH:=all
 endef
 
 define Package/luci-app-log-viewer/description
- REFFIX Log Viewer v2: System Log, Kernel Log, Firewall Log and
- optional local GeoLite2 Country/ASN enrichment.
+ REFFIX Firewall Log with optional local GeoLite2 Country/ASN enrichment.
 endef
 
 define Build/Compile
