@@ -170,7 +170,7 @@ return view.extend({
       const asn = geo.asn_organization || '';
       return '<tr class="tr ' + (e.kind === 'Blocked' ? 'fw-blocked' : 'fw-probe') + '">' +
         '<td class="td fw-time">' + esc(e.timestamp) + '</td>' +
-        '<td class="td fw-source"><span title="' + esc(country) + '">' + countryFlag(countryCode) + '</span> ' +
+        '<td class="td fw-source"><span class="fw-flag" title="' + esc(country) + '">' + countryFlag(countryCode) + '</span> ' +
           '<code>' + esc(e.source) + '</code><small>' + esc(country) + (asn ? ' · ' + esc(asn) : '') + '</small></td>' +
         '<td class="td"><code>' + esc(e.destination || '—') + '</code></td>' +
         '<td class="td"><strong>' + esc(e.dport || '—') + '</strong><small>' + esc(e.service) + '</small></td>' +
@@ -188,6 +188,7 @@ return view.extend({
     document.head.appendChild(E('style', {type: 'text/css'},
       '.fw-toolbar{display:flex;gap:.6em;flex-wrap:wrap;align-items:center;margin:.8em 0}' +
       '.fw-toolbar input,.fw-toolbar select{min-width:10em}' +
+      '.fw-flag{display:inline-block;min-width:1.45em;margin-right:.18em;font-family:"Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji","Twitter Color Emoji",emoji,sans-serif;font-size:1.15em;font-variant-emoji:emoji;line-height:1;vertical-align:-.1em}' +
       '.fw-stats{display:grid;grid-template-columns:repeat(4,minmax(8em,1fr));gap:.7em;margin:1em 0}' +
       '.fw-stat{border:1px solid var(--border-color,#444);border-radius:8px;padding:1em;background:var(--background-color-secondary,#222)}' +
       '.fw-stat span{display:block;font-size:.75em;opacity:.7;letter-spacing:.06em}.fw-stat strong{font-size:1.5em}' +
