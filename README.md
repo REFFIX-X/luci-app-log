@@ -19,13 +19,12 @@ Connect over SSH as root:
 uclient-fetch -qO- https://raw.githubusercontent.com/REFFIX-X/luci-app-log/master/install-online.sh | sh
 ```
 
-The installer detects APK/IPK support and downloads the matching package and GeoIP helper. It first uses the package mirror; if GitHub's raw-content host is unavailable, it falls back to the assets attached to the pinned v2.0.0 release.
+The installer supports only OpenWrt 25.12/APK on the Flint4-class `aarch64_cortex-a53` target and downloads the matching package and GeoIP helper. It first uses the package mirror; if GitHub's raw-content host is unavailable, it falls back to the assets attached to the v2.0.0 release.
 
 Supported release assets:
-- OpenWrt 25.12, APK, `aarch64_cortex-a53`
-- OpenWrt 24.10, IPK, `aarch64_cortex-a53`
+- OpenWrt 25.12, APK, `aarch64_cortex-a53` only
 
-Manual packages and checksums are published on [GitHub Releases](https://github.com/REFFIX-X/luci-app-log/releases).
+Manual APK packages and SHA-256 checksums are published on [GitHub Releases](https://github.com/REFFIX-X/luci-app-log/releases).
 
 ## Firewall log semantics
 
