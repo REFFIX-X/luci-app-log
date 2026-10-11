@@ -386,83 +386,363 @@ return view.extend({
   },
 
   render: function() {
-    document.head.appendChild(E('style', {type: 'text/css'},
-      '.fw-toolbar{display:flex;gap:.6em;flex-wrap:wrap;align-items:center;margin:.8em 0}' +
-      '.fw-toolbar input,.fw-toolbar select{min-width:10em}' +
-      '.fw-flag{display:inline-flex;min-width:22px;height:16px;margin-right:.25em;align-items:center;justify-content:center;vertical-align:middle}' +
-      '.fw-flag-img{display:block;width:20px;max-height:15px;height:auto;object-fit:contain;border:1px solid rgba(127,127,127,.45);border-radius:2px}' +
-      '.fw-flag-fallback{font-size:1.1em;line-height:1}' +
-      '.fw-stats{display:grid;grid-template-columns:repeat(6,minmax(7em,1fr));gap:.7em;margin:1em 0}' +
-      '.fw-insights{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.7em;margin:.7em 0 1em}' +
-      '.fw-insight{border:1px solid var(--border-color,#444);border-radius:8px;padding:.8em;background:var(--background-color-secondary,#222);min-width:0}' +
-      '.fw-insight h3{margin:0 0 .5em;font-size:1em}.fw-insight-policy{grid-column:1 / -1}' +
-      '.fw-insight-list{list-style:none;margin:0;padding:0}' +
-      '.fw-insight-list li{padding:.4em 0;border-bottom:1px solid var(--border-color,#444);display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.15em .7em}' +
-      '.fw-insight-list li:last-child{border-bottom:0}.fw-insight-list li small{grid-column:1 / -1;opacity:.7;overflow-wrap:anywhere}' +
-      '.fw-muted{opacity:.72;font-size:.86em;margin:.35em 0}.fw-signal{font-size:.75em;padding:.1em .4em;border-radius:4px;background:rgba(138,106,8,.22);white-space:nowrap}' +
-      '.fw-event-policy{display:block;font-size:.78em;opacity:.75;max-width:12em;overflow-wrap:anywhere}' +
-      '.fw-stat{border:1px solid var(--border-color,#444);border-radius:8px;padding:1em;background:var(--background-color-secondary,#222)}' +
-      '.fw-stat span{display:block;font-size:.75em;opacity:.7;letter-spacing:.06em}.fw-stat strong{font-size:1.5em}' +
-      '.fw-tablewrap{overflow:auto;max-height:68vh;border:1px solid var(--border-color,#444);border-radius:8px}' +
-      '.fw-table{width:100%;min-width:1000px}.fw-table th{position:sticky;top:0;background:var(--background-color-high,#252a30);z-index:1}' +
-      '.fw-source small,.fw-detail small,.fw-table td:nth-child(4) small{display:block;opacity:.72;margin-top:.25em;font-size:.82em}' +
-      '.fw-source code{white-space:nowrap}.fw-time{white-space:nowrap;font-size:.9em}' +
-      '.fw-badge{border-radius:5px;padding:.15em .55em;font-size:.85em;font-weight:700;white-space:nowrap}' +
-      '.fw-badge.danger,.fw-badge.blocked{background:#a52d32;color:#fff}.fw-badge.observed{background:#8a6a08;color:#fff}.fw-badge.allowed{background:#246d49;color:#fff}' +
-      '.fw-blocked{background:rgba(178,45,50,.08)}.fw-observed{background:rgba(194,148,16,.06)}.fw-allowed{background:rgba(36,109,73,.08)}' +
-      '.fw-copy-ip{font-size:.75em;min-height:1.6em;padding:.05em .4em;margin-left:.25em}' +
-      '@media(max-width:1200px){.fw-stats{grid-template-columns:repeat(3,minmax(7em,1fr))}}' +
-      '@media(max-width:800px){.fw-stats{grid-template-columns:repeat(2,minmax(8em,1fr))}.fw-insights{grid-template-columns:1fr}.fw-insight-policy{grid-column:auto}}' +
-      /* Higher contrast while preserving the existing slate/amber/blue/green palette. */
-      '.fw-toolbar input,.fw-toolbar select{color:#e8eef6;font-size:.95em}' +
-      '.fw-insight{color:#e2e8f0;border-color:#4d5867;background:#24292f}' +
-      '.fw-insight h3{color:#f6f8fc;font-size:1.08em;font-weight:750;letter-spacing:.01em}' +
-      '.fw-insight-list li{border-bottom-color:#414b58;color:#e1e8f1}' +
-      '.fw-insight-list li span{color:#dde6f1;font-size:.92em;font-weight:650}' +
-      '.fw-insight-list li small{color:#bdc8d7;opacity:1;font-size:.9em;line-height:1.4}' +
-      '.fw-muted{color:#c2cedc;opacity:1;font-size:.9em;line-height:1.45}' +
-      '.fw-signal{color:#ffe2a0;background:rgba(138,106,8,.3);border:1px solid rgba(255,210,112,.45);font-size:.8em;font-weight:700}' +
-      '.fw-event-policy{color:#c7d3e2;opacity:1;font-size:.84em;line-height:1.35}' +
-      '.fw-stat{color:#ecf2f9;border-color:#4a5665;background:#23282f}' +
-      '.fw-stat span{color:#c2cedc;font-size:.82em;opacity:1;font-weight:700;letter-spacing:.045em}' +
-      '.fw-stat strong{color:#f7f9fd;font-size:1.65em;line-height:1.3}' +
-      '.fw-table th{color:#f2f6fc;font-size:.92em;font-weight:750;padding:.75em .6em;border-bottom:1px solid #4b5665}' +
-      '.fw-table td{color:#e2e8f0;font-size:.93em}' +
-      '.fw-source small,.fw-detail small,.fw-table td:nth-child(4) small{color:#c2cedc;opacity:1;font-size:.88em;line-height:1.4}' +
-      '.fw-source code{color:#f1f5fb;font-size:.97em;font-weight:600}' +
-      '.fw-time{color:#e5ebf4;font-size:.93em}' +
-      '.fw-copy-ip{font-size:.8em;color:#d8e6f8;border:1px solid #53657b;background:rgba(48,91,146,.15)}' +
-      '.fw-badge{font-size:.88em;padding:.2em .6em;font-weight:750}' +
-      '.fw-badge.observed{background:#8a6800;color:#fff;border:1px solid #c69d16}' +
-      '.fw-badge.blocked,.fw-badge.danger{background:#a52d32;color:#fff;border:1px solid #e16a70}' +
-      '.fw-badge.allowed{background:#246d49;color:#fff;border:1px solid #58af7e}' +
-      /* Explicit pixel sizing beats inherited LuCI opacity and tiny relative text. */
-      '.fw-description{color:#e1e9f4!important;font-size:14px!important;line-height:1.55!important;font-weight:500}' +
-      '.fw-stats,.fw-insights,.fw-toolbar,.fw-tablewrap{font-size:16px!important}' +
-      '.fw-insight{color:#f0f4fa!important;border-color:#566476!important;background:#242a31!important;padding:14px!important}' +
-      '.fw-insight h3{color:#ffffff!important;font-size:16px!important;font-weight:800!important;line-height:1.35!important;margin-bottom:9px!important}' +
-      '.fw-insight-list li{font-size:14px!important;line-height:1.45!important;padding:7px 0!important;color:#edf2f8!important;border-bottom-color:#4b5665!important}' +
-      '.fw-insight-list li span{color:#edf3fb!important;font-size:13px!important;font-weight:750!important}' +
-      '.fw-insight-list li small{color:#d0dae7!important;font-size:13px!important;line-height:1.5!important;opacity:1!important}' +
-      '.fw-muted{color:#d2dce9!important;font-size:13px!important;line-height:1.5!important;opacity:1!important}' +
-      '.fw-signal{color:#ffe8b3!important;font-size:12px!important;font-weight:800!important;padding:3px 6px!important;border:1px solid #a98736!important}' +
-      '.fw-event-policy{color:#d8e2ee!important;font-size:12px!important;line-height:1.45!important;opacity:1!important}' +
-      '.fw-stat{padding:13px!important;background:#242a31!important;border-color:#566476!important}' +
-      '.fw-stat span{color:#d6e0ed!important;font-size:12px!important;font-weight:800!important;letter-spacing:.055em!important;opacity:1!important}' +
-      '.fw-stat strong{color:#ffffff!important;font-size:28px!important;font-weight:800!important;line-height:1.25!important}' +
-      '.fw-toolbar input,.fw-toolbar select,.fw-toolbar button{font-size:14px!important;line-height:1.4!important;min-height:36px!important;color:#f2f6fc!important}' +
-      '.fw-table{font-size:14px!important}' +
-      '.fw-table th{color:#ffffff!important;font-size:14px!important;font-weight:800!important;padding:11px 9px!important;background:#2a3039!important;border-bottom:1px solid #667487!important}' +
-      '.fw-table td{color:#edf2f9!important;font-size:14px!important;line-height:1.45!important;padding:10px 9px!important}' +
-      '.fw-source code{color:#ffffff!important;font-size:14px!important;font-weight:750!important}' +
-      '.fw-source small,.fw-detail small,.fw-table td:nth-child(4) small{color:#d0dbea!important;font-size:13px!important;line-height:1.45!important;opacity:1!important}' +
-      '.fw-time{color:#eaf0f8!important;font-size:13px!important}' +
-      '.fw-copy-ip{font-size:12px!important;min-height:25px!important;color:#e4efff!important;border-color:#607b9c!important;background:#263b52!important}' +
-      '.fw-badge{font-size:13px!important;font-weight:850!important;padding:4px 8px!important;border-radius:5px!important}' +
-      '.fw-badge.observed{background:#997400!important;color:#ffffff!important;border:1px solid #f0c84b!important}' +
-      '.fw-badge.blocked,.fw-badge.danger{background:#b52e38!important;color:#ffffff!important;border:1px solid #ff8189!important}' +
-      '.fw-badge.allowed{background:#176b45!important;color:#ffffff!important;border:1px solid #61d39c!important}'
-    ));
+    document.head.appendChild(E('style', { type: 'text/css' }, `
+      .fw-shell {
+        --mp-bg: #2D2A2E;
+        --mp-panel: #221F22;
+        --mp-surface: #343136;
+        --mp-hover: #403E41;
+        --mp-border: #514D52;
+        --mp-fg: #FCFCFA;
+        --mp-muted: #C7C3C8;
+        --mp-yellow: #FFD866;
+        --mp-orange: #FC9867;
+        --mp-pink: #FF6188;
+        --mp-green: #A9DC76;
+        --mp-cyan: #78DCE8;
+        --mp-purple: #AB9DF2;
+        box-sizing: border-box;
+        width: 100%;
+        min-width: 0;
+        padding: 16px;
+        color: var(--mp-fg) !important;
+        background: var(--mp-bg) !important;
+        border: 1px solid var(--mp-border);
+        border-radius: 12px;
+        font-size: 15px;
+        line-height: 1.5;
+        color-scheme: dark;
+      }
+      .fw-shell * { box-sizing: border-box; }
+      .fw-shell .fw-description {
+        color: var(--mp-muted) !important;
+        font-size: 14px !important;
+        line-height: 1.6 !important;
+        font-weight: 500;
+        margin: 0 0 14px;
+        max-width: 110ch;
+      }
+      .fw-shell .fw-stats {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 10px;
+        margin: 14px 0;
+      }
+      .fw-shell .fw-stat {
+        min-width: 0;
+        padding: 13px 14px;
+        background: var(--mp-panel) !important;
+        border: 1px solid var(--mp-border) !important;
+        border-radius: 9px;
+      }
+      .fw-shell .fw-stat span {
+        display: block;
+        color: var(--mp-muted) !important;
+        font-size: 12px !important;
+        font-weight: 800;
+        line-height: 1.35;
+        letter-spacing: .06em;
+        opacity: 1 !important;
+      }
+      .fw-shell .fw-stat strong {
+        display: block;
+        margin-top: 4px;
+        color: var(--mp-fg) !important;
+        font-size: 28px !important;
+        font-weight: 850;
+        line-height: 1.25;
+        font-variant-numeric: tabular-nums;
+      }
+      .fw-shell .fw-stat:nth-child(1) strong { color: var(--mp-cyan) !important; }
+      .fw-shell .fw-stat:nth-child(2) strong { color: var(--mp-purple) !important; }
+      .fw-shell .fw-stat:nth-child(3) strong { color: var(--mp-pink) !important; }
+      .fw-shell .fw-stat:nth-child(4) strong { color: var(--mp-yellow) !important; }
+      .fw-shell .fw-stat:nth-child(5) strong { color: var(--mp-green) !important; }
+      .fw-shell .fw-stat:nth-child(6) strong { color: var(--mp-orange) !important; }
+
+      .fw-shell .fw-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin: 12px 0;
+        color: var(--mp-muted) !important;
+        font-size: 14px !important;
+      }
+      .fw-shell .fw-toolbar input,
+      .fw-shell .fw-toolbar select {
+        min-width: 145px;
+        min-height: 38px !important;
+        padding: 7px 10px !important;
+        color: var(--mp-fg) !important;
+        background: var(--mp-surface) !important;
+        border: 1px solid var(--mp-border) !important;
+        border-radius: 7px !important;
+        box-shadow: none !important;
+        font-size: 14px !important;
+      }
+      .fw-shell .fw-toolbar input::placeholder { color: #B0AAB2 !important; opacity: 1; }
+      .fw-shell .fw-toolbar input:focus,
+      .fw-shell .fw-toolbar select:focus {
+        border-color: var(--mp-yellow) !important;
+        outline: 2px solid rgba(255,216,102,.22);
+        outline-offset: 1px;
+      }
+      .fw-shell .fw-toolbar button {
+        min-height: 38px !important;
+        padding: 7px 12px !important;
+        color: var(--mp-fg) !important;
+        background: var(--mp-hover) !important;
+        border: 1px solid #625B65 !important;
+        border-radius: 7px !important;
+        font-size: 14px !important;
+        font-weight: 700;
+        transition: background .12s ease, border-color .12s ease;
+      }
+      .fw-shell .fw-toolbar button:hover {
+        background: #4A454C !important;
+        border-color: var(--mp-purple) !important;
+      }
+      .fw-shell .fw-toolbar .cbi-button-action {
+        color: #221F22 !important;
+        background: var(--mp-yellow) !important;
+        border-color: var(--mp-yellow) !important;
+        font-weight: 850;
+      }
+      .fw-shell .fw-toolbar .cbi-button-action:hover {
+        background: #FFE59A !important;
+      }
+      .fw-shell .fw-toolbar .right {
+        color: var(--mp-muted) !important;
+        font-size: 13px !important;
+        font-variant-numeric: tabular-nums;
+      }
+      .fw-shell .fw-muted {
+        color: var(--mp-muted) !important;
+        font-size: 13px !important;
+        line-height: 1.55 !important;
+        opacity: 1 !important;
+      }
+
+      .fw-shell .fw-insights {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin: 12px 0 16px;
+      }
+      .fw-shell .fw-insight {
+        min-width: 0;
+        padding: 14px !important;
+        color: var(--mp-fg) !important;
+        background: var(--mp-panel) !important;
+        border: 1px solid var(--mp-border) !important;
+        border-radius: 10px !important;
+      }
+      .fw-shell .fw-insight h3 {
+        margin: 0 0 10px !important;
+        color: var(--mp-fg) !important;
+        font-size: 16px !important;
+        font-weight: 850 !important;
+        line-height: 1.35;
+        letter-spacing: .01em;
+      }
+      .fw-shell .fw-insight:nth-child(1) h3 { color: var(--mp-cyan) !important; }
+      .fw-shell .fw-insight:nth-child(2) h3 { color: var(--mp-orange) !important; }
+      .fw-shell .fw-insight:nth-child(3) h3 { color: var(--mp-purple) !important; }
+      .fw-shell .fw-insight:nth-child(4) h3 { color: var(--mp-yellow) !important; }
+      .fw-shell .fw-insight-list { list-style: none; margin: 0; padding: 0; }
+      .fw-shell .fw-insight-list li {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 4px 10px;
+        padding: 8px 0 !important;
+        color: var(--mp-fg) !important;
+        border-bottom: 1px solid #413C43 !important;
+        font-size: 14px !important;
+        line-height: 1.45 !important;
+      }
+      .fw-shell .fw-insight-list li:last-child { border-bottom: 0 !important; }
+      .fw-shell .fw-insight-list li span {
+        color: var(--mp-fg) !important;
+        font-size: 13px !important;
+        font-weight: 750;
+        white-space: nowrap;
+      }
+      .fw-shell .fw-insight-list li small {
+        grid-column: 1 / -1;
+        color: var(--mp-muted) !important;
+        font-size: 13px !important;
+        font-weight: 500;
+        line-height: 1.5 !important;
+        opacity: 1 !important;
+        overflow-wrap: anywhere;
+      }
+      .fw-shell .fw-insight-list code,
+      .fw-shell .fw-source code,
+      .fw-shell .fw-table code {
+        color: var(--mp-fg) !important;
+        background: var(--mp-surface) !important;
+        border: 1px solid #49434B;
+        border-radius: 4px;
+        padding: 2px 5px;
+        font-size: 13px !important;
+        font-weight: 700;
+      }
+      .fw-shell .fw-signal {
+        padding: 3px 7px !important;
+        color: #FFE8B3 !important;
+        background: #51412A !important;
+        border: 1px solid #8C7040 !important;
+        border-radius: 5px;
+        font-size: 12px !important;
+        font-weight: 850;
+        white-space: nowrap;
+      }
+      .fw-shell .fw-insight-policy { grid-column: 1 / -1; }
+      .fw-shell .fw-event-policy {
+        display: block;
+        max-width: 18em;
+        margin-top: 3px;
+        color: var(--mp-muted) !important;
+        font-size: 12px !important;
+        line-height: 1.45;
+        opacity: 1 !important;
+        overflow-wrap: anywhere;
+      }
+
+      .fw-shell .fw-tablewrap {
+        max-height: 68vh;
+        overflow: auto;
+        background: var(--mp-panel) !important;
+        border: 1px solid var(--mp-border) !important;
+        border-radius: 10px !important;
+      }
+      .fw-shell .fw-table {
+        width: 100%;
+        min-width: 1000px;
+        border-collapse: separate;
+        border-spacing: 0;
+        background: var(--mp-bg) !important;
+        font-size: 14px !important;
+      }
+      .fw-shell .fw-table thead th {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        padding: 11px 10px !important;
+        color: var(--mp-fg) !important;
+        background: #403A42 !important;
+        border-bottom: 1px solid #645A67 !important;
+        font-size: 13px !important;
+        font-weight: 850 !important;
+        line-height: 1.4;
+        text-align: left;
+      }
+      .fw-shell .fw-table tbody tr { background: #302C32 !important; }
+      .fw-shell .fw-table tbody tr:nth-child(even) { background: #29262B !important; }
+      .fw-shell .fw-table tbody tr:hover { background: #403B43 !important; }
+      .fw-shell .fw-table tbody tr.fw-blocked { box-shadow: inset 3px 0 var(--mp-pink); }
+      .fw-shell .fw-table tbody tr.fw-observed { box-shadow: inset 3px 0 var(--mp-yellow); }
+      .fw-shell .fw-table tbody tr.fw-allowed { box-shadow: inset 3px 0 var(--mp-green); }
+      .fw-shell .fw-table td {
+        padding: 10px !important;
+        color: var(--mp-fg) !important;
+        border-bottom: 1px solid #443E46 !important;
+        font-size: 14px !important;
+        font-weight: 500;
+        line-height: 1.5 !important;
+        vertical-align: top;
+      }
+      .fw-shell .fw-time {
+        min-width: 130px;
+        color: #E3DDE5 !important;
+        font-size: 13px !important;
+        white-space: nowrap;
+      }
+      .fw-shell .fw-source { min-width: 220px; }
+      .fw-shell .fw-source code {
+        color: #FFFFFF !important;
+        font-size: 14px !important;
+        font-weight: 800;
+        white-space: nowrap;
+      }
+      .fw-shell .fw-source small,
+      .fw-shell .fw-detail small,
+      .fw-shell .fw-table td:nth-child(4) small {
+        display: block;
+        margin-top: 4px;
+        color: var(--mp-muted) !important;
+        font-size: 13px !important;
+        font-weight: 500;
+        line-height: 1.5 !important;
+        opacity: 1 !important;
+      }
+      .fw-shell .fw-table td:nth-child(3) code { color: var(--mp-cyan) !important; }
+      .fw-shell .fw-table td:nth-child(4) strong { color: var(--mp-orange) !important; font-size: 15px; }
+      .fw-shell .fw-table a {
+        color: var(--mp-cyan) !important;
+        font-weight: 750;
+        text-decoration: none;
+      }
+      .fw-shell .fw-table a:hover { color: #B8F3F8 !important; text-decoration: underline; }
+      .fw-shell .fw-copy-ip {
+        min-height: 25px !important;
+        margin-left: 4px;
+        padding: 2px 7px !important;
+        color: var(--mp-cyan) !important;
+        background: #2D3940 !important;
+        border: 1px solid #53666B !important;
+        border-radius: 5px !important;
+        font-size: 12px !important;
+        font-weight: 750;
+      }
+      .fw-shell .fw-badge {
+        display: inline-block;
+        padding: 4px 8px !important;
+        border: 1px solid transparent;
+        border-radius: 5px !important;
+        font-size: 13px !important;
+        font-weight: 850 !important;
+        line-height: 1.35;
+        white-space: nowrap;
+      }
+      .fw-shell .fw-badge.observed {
+        color: #2D2A2E !important;
+        background: var(--mp-yellow) !important;
+        border-color: #FFE69A !important;
+      }
+      .fw-shell .fw-badge.blocked,
+      .fw-shell .fw-badge.danger {
+        color: #2D2A2E !important;
+        background: var(--mp-pink) !important;
+        border-color: #FFA0B8 !important;
+      }
+      .fw-shell .fw-badge.allowed {
+        color: #22251E !important;
+        background: var(--mp-green) !important;
+        border-color: #C5EBA1 !important;
+      }
+      .fw-shell .fw-flag { display: inline-flex; min-width: 22px; height: 16px; margin-right: 4px; align-items: center; justify-content: center; vertical-align: middle; }
+      .fw-shell .fw-flag-img { display: block; width: 20px; max-height: 15px; height: auto; object-fit: contain; border: 1px solid #514D52; border-radius: 2px; }
+      .fw-shell .fw-flag-fallback { font-size: 1.1em; line-height: 1; }
+      .fw-shell .fw-copy-ip:focus-visible,
+      .fw-shell .fw-toolbar button:focus-visible,
+      .fw-shell a:focus-visible {
+        outline: 2px solid var(--mp-purple) !important;
+        outline-offset: 2px;
+      }
+      @media (max-width: 1200px) {
+        .fw-shell .fw-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      }
+      @media (max-width: 800px) {
+        .fw-shell { padding: 10px; }
+        .fw-shell .fw-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .fw-shell .fw-insights { grid-template-columns: 1fr; }
+        .fw-shell .fw-insight-policy { grid-column: auto; }
+        .fw-shell .fw-toolbar input,
+        .fw-shell .fw-toolbar select { flex: 1 1 140px; min-width: 0; }
+      }
+    `));
 
     this.stats = E('div', {class: 'fw-stats'});
     this.search = E('input', {class: 'cbi-input-text', type: 'search', placeholder: _('Search IP, country, ASN, port or service…')});
@@ -502,7 +782,7 @@ return view.extend({
       this.tbody
     ]);
 
-    const result = E('div', {}, [
+    const result = E('div', {class: 'fw-shell'}, [
       E('p', {class: 'cbi-section-descr fw-description'}, _('Verdicts matter: Blocked requires explicit DROP/REJECT/BLOCK evidence. Observed means INFRA_PORT_HIT saw a packet, but final verdict is unknown because that watch rule returns and normal firewall policy handles it. Allowed appears only when an ALLOW/ACCEPT rule explicitly logs. Select a time window, pause live refresh, inspect top sources/ports/ASNs and scan-like bursts. GeoIP is local; MAC, TOS and packet-ID noise are omitted.')),
       this.stats,
       E('div', {class: 'fw-toolbar'}, [

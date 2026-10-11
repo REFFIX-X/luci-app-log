@@ -107,3 +107,8 @@ The Firewall Log uses higher-contrast text, stronger card boundaries and larger 
 ### Readability (r27)
 
 The dashboard uses explicit high-contrast pixel sizing for table cells, statistics, toolbars, helper text and insight panels so labels remain legible under LuCI's inherited theme styles.
+
+
+## Firewall Log colorway
+
+The dashboard uses a Monokai Pro-inspired palette: warm charcoal background (`#2D2A2E`), deep panels (`#221F22`), warm off-white text (`#FCFCFA`), and yellow, pink, orange, green, cyan and purple accents. This is a small original CSS adaptation scoped to this LuCI view; it does not change the global LuCI theme.
