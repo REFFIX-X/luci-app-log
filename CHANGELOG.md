@@ -1,10 +1,9 @@
 # Changelog
 
-## v1.5.0-r15 - 2026-10-11
+## v1.5.0-r16 - 2026-10-11
 
-- Publish built APK/IPK packages on a versioned `package-assets` branch for direct `raw.githubusercontent.com` downloads.
-- Update the one-line installer to fetch a simple `latest` marker and download binaries without GitHub release-asset redirects, which some OpenWrt `uclient-fetch` builds cannot follow.
-- Keep the APK/IPK release assets and SHA-256 checksum files on GitHub Releases as before.
-- Bump package release to r15; keep the existing `luci-app-log-viewer` package name for in-place upgrades.
+- Fix GeoLite2 update validation by using `8.8.8.8` rather than `1.1.1.1`; an anycast IP may not contain the optional `country.iso_code` path, causing a valid database to be rejected.
+- Keep both Country and ASN database lookups validated before replacing the currently installed database files.
+- Continue publishing the APK/IPK packages through the direct-download `package-assets` branch and GitHub release assets.
 
-Targeted builds remain OpenWrt 25.12 APK and OpenWrt 24.10 IPK for `aarch64_cortex-a53`. The release workflow publishes the same binaries to the direct-download branch before publishing the GitHub Release.
+Targets: OpenWrt 25.12 APK and OpenWrt 24.10 IPK for `aarch64_cortex-a53`.
