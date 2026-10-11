@@ -1,8 +1,9 @@
 #!/bin/sh
-# One-line installer for the REFFIX OpenWrt LuCI app. Supports Flint4-class aarch64_cortex-a53 only.
+# REFFIX Log Viewer installer for Flint4-class aarch64_cortex-a53 targets.
 set -eu
 
 REPO=REFFIX-X/luci-app-log
+VERSION_FALLBACK=v2.0.0
 TMP="/tmp/reffix-luci-install.$$"
 mkdir -p "$TMP"
 trap 'rm -rf "$TMP"' EXIT INT TERM
@@ -21,33 +22,25 @@ fetch() {
 }
 
 if command -v apk >/dev/null 2>&1; then
-  # Prefer OpenWrt's configured package architecture. apk --print-arch can
-  # report the generic CPU architecture ("aarch64") on some vendor builds.
   if [ -r /etc/apk/arch ]; then
     ARCH="$(sed -n '1{s/[[:space:]]*$//;p;}' /etc/apk/arch)"
   else
     ARCH="$(apk --print-arch 2>/dev/null || true)"
   fi
-  # If the configured file is absent or generic, confirm release/target before
-  # mapping aarch64 to the supported Cortex-A53 package family.
-  if [ -r /etc/openwrt_release ]; then
-    . /etc/openwrt_release
-  fi
+  if [ -r /etc/openwrt_release ]; then . /etc/openwrt_release; fi
   case "$ARCH" in
     aarch64_cortex-a53*) FAMILY=25.12; EXT=apk ;;
     aarch64)
       case "${DISTRIB_RELEASE:-}:${DISTRIB_TARGET:-}" in
-        25.12*:mediatek/filogic*|SNAPSHOT:mediatek/filogic*)
-          FAMILY=25.12; EXT=apk
-          ;;
+        25.12*:mediatek/filogic*|SNAPSHOT:mediatek/filogic*) FAMILY=25.12; EXT=apk ;;
         *)
-          echo "ERROR: apk reports generic architecture aarch64, but this installer only supports OpenWrt 25.12 on mediatek/filogic. Detected release=${DISTRIB_RELEASE:-unknown}, target=${DISTRIB_TARGET:-unknown}." >&2
+          echo "ERROR: generic aarch64 is only mapped for OpenWrt 25.12/SNAPSHOT mediatek/filogic. Detected release=${DISTRIB_RELEASE:-unknown}, target=${DISTRIB_TARGET:-unknown}." >&2
           exit 1
           ;;
       esac
       ;;
     *)
-      echo "ERROR: unsupported APK architecture: ${ARCH:-unknown}. Supported target: OpenWrt 25.12 mediatek/filogic (aarch64 Cortex-A53)." >&2
+      echo "ERROR: unsupported APK architecture: ${ARCH:-unknown}. Supported target is aarch64_cortex-a53." >&2
       exit 1
       ;;
   esac
@@ -56,7 +49,7 @@ elif command -v opkg >/dev/null 2>&1; then
   ARCH="$(opkg print-architecture 2>/dev/null | awk '$2 >= 10 {print $1}' | tail -n 1)"
   case "$ARCH" in
     *aarch64_cortex-a53*) FAMILY=24.10; EXT=ipk ;;
-    *) echo "ERROR: unsupported opkg architecture: ${ARCH:-unknown}. Current release assets target aarch64_cortex-a53." >&2; exit 1 ;;
+    *) echo "ERROR: unsupported opkg architecture: ${ARCH:-unknown}. Supported target is aarch64_cortex-a53." >&2; exit 1 ;;
   esac
   PM=opkg
 else
@@ -64,39 +57,49 @@ else
   exit 1
 fi
 
-echo "REFFIX LuCI installer: detected ${PM}, target family ${FAMILY}, architecture ${ARCH}."
+echo "REFFIX installer: package manager=$PM, target family=$FAMILY, architecture=$ARCH."
 VERSION_FILE="$TMP/latest"
-if ! fetch "https://raw.githubusercontent.com/${REPO}/package-assets/latest" "$VERSION_FILE"; then
-  echo "ERROR: couldn't read the direct-download package index from GitHub." >&2
-  exit 1
-fi
-VERSION="$(sed -n '1p' "$VERSION_FILE")"
-case "$VERSION" in
-  v[0-9]*) ;;
-  *) echo "ERROR: package mirror returned an invalid release version: ${VERSION:-empty}." >&2; exit 1 ;;
-esac
-BASE="https://raw.githubusercontent.com/${REPO}/package-assets/${VERSION}"
-APP="$TMP/reffix-luci-app-log-viewer.${EXT}"
-LIB="$TMP/reffix-libmaxminddb.${EXT}"
-echo "Using package release ${VERSION} via direct raw downloads."
-if ! fetch "$BASE/reffix-libmaxminddb-openwrt-${FAMILY}.${EXT}" "$LIB"; then
-  echo "ERROR: failed to download the matching libmaxminddb package from the direct package mirror." >&2
-  exit 1
-fi
-if ! fetch "$BASE/reffix-luci-app-log-viewer-openwrt-${FAMILY}.${EXT}" "$APP"; then
-  echo "ERROR: failed to download the REFFIX LuCI package from the direct package mirror." >&2
-  exit 1
+VERSION=""
+if fetch "https://raw.githubusercontent.com/${REPO}/package-assets/latest" "$VERSION_FILE"; then
+  CANDIDATE="$(sed -n '1p' "$VERSION_FILE" 2>/dev/null || true)"
+  case "$CANDIDATE" in v[0-9]*) VERSION="$CANDIDATE" ;; esac
 fi
 
-echo "Installing GeoIP helper library..."
+if [ -n "$VERSION" ]; then
+  BASE="https://raw.githubusercontent.com/${REPO}/package-assets/${VERSION}"
+  echo "Using package mirror release $VERSION."
+  if ! fetch "$BASE/reffix-libmaxminddb-openwrt-${FAMILY}.${EXT}" "$TMP/lib.${EXT}" ||
+     ! fetch "$BASE/reffix-luci-app-log-viewer-openwrt-${FAMILY}.${EXT}" "$TMP/app.${EXT}"; then
+    echo "WARNING: package mirror download failed; trying GitHub release assets." >&2
+    VERSION=""
+  fi
+fi
+
+if [ -z "$VERSION" ]; then
+  VERSION="$VERSION_FALLBACK"
+  BASE="https://github.com/${REPO}/releases/download/${VERSION}"
+  echo "Using GitHub release asset fallback: $VERSION."
+  fetch "$BASE/reffix-libmaxminddb-openwrt-${FAMILY}.${EXT}" "$TMP/lib.${EXT}" || {
+    echo "ERROR: couldn't download the matching GeoIP helper package from GitHub Releases." >&2
+    echo "Check connectivity to github.com and confirm release $VERSION contains this platform's assets." >&2
+    exit 1
+  }
+  fetch "$BASE/reffix-luci-app-log-viewer-openwrt-${FAMILY}.${EXT}" "$TMP/app.${EXT}" || {
+    echo "ERROR: couldn't download the REFFIX Log Viewer package from GitHub Releases." >&2
+    echo "Check connectivity to github.com and confirm release $VERSION contains this platform's assets." >&2
+    exit 1
+  }
+fi
+
+echo "Installing matching GeoIP helper library..."
 if [ "$PM" = apk ]; then
-  apk add --allow-untrusted "$LIB"
-  echo "Installing/upgrading REFFIX LuCI app..."
-  apk add --allow-untrusted "$APP"
+  apk add --allow-untrusted "$TMP/lib.${EXT}"
+  echo "Installing/upgrading REFFIX Log Viewer..."
+  apk add --allow-untrusted "$TMP/app.${EXT}"
 else
-  opkg install "$LIB"
-  echo "Installing/upgrading REFFIX LuCI app..."
-  opkg install "$APP"
+  opkg install "$TMP/lib.${EXT}"
+  echo "Installing/upgrading REFFIX Log Viewer..."
+  opkg install "$TMP/app.${EXT}"
 fi
 
 if [ -x /usr/bin/flint4-geoip-update ]; then
@@ -104,7 +107,7 @@ if [ -x /usr/bin/flint4-geoip-update ]; then
   if /usr/bin/flint4-geoip-update; then
     echo "GeoIP databases are ready."
   else
-    echo "WARNING: GeoIP database download failed; the app is installed, but local country/ASN enrichment will be unavailable until updated." >&2
+    echo "WARNING: GeoIP download failed; the app is installed, but local country/ASN enrichment is unavailable until updated." >&2
   fi
 fi
 
