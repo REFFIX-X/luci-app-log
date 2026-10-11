@@ -21,10 +21,15 @@ fetch() {
 }
 
 if command -v apk >/dev/null 2>&1; then
-  ARCH="$(apk --print-arch 2>/dev/null || true)"
-  # apk may report the generic CPU architecture ("aarch64") rather than
-  # OpenWrt's package-feed architecture ("aarch64_cortex-a53"). On APK-based
-  # OpenWrt, confirm the release/target before mapping that generic name.
+  # Prefer OpenWrt's configured package architecture. apk --print-arch can
+  # report the generic CPU architecture ("aarch64") on some vendor builds.
+  if [ -r /etc/apk/arch ]; then
+    ARCH="$(sed -n '1{s/[[:space:]]*$//;p;}' /etc/apk/arch)"
+  else
+    ARCH="$(apk --print-arch 2>/dev/null || true)"
+  fi
+  # If the configured file is absent or generic, confirm release/target before
+  # mapping aarch64 to the supported Cortex-A53 package family.
   if [ -r /etc/openwrt_release ]; then
     . /etc/openwrt_release
   fi
