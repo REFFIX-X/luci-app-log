@@ -2,19 +2,36 @@
 # REFFIX maintained fork of gSpotx2f/luci-app-log
 # Original application is distributed under the MIT License.
 #
+
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-log-viewer
 PKG_VERSION:=1.5.0
-PKG_RELEASE:=12
-LUCI_TITLE:=Advanced syslog, kernel and firewall log viewer
-LUCI_DEPENDS:=+ucode +ucode-mod-fs +libmaxminddb
-LUCI_PKGARCH:=all
+PKG_RELEASE:=13
 PKG_LICENSE:=MIT
+PKG_MAINTAINER:=REFFIX
 
-# Keep the package name literal so external OpenWrt feed scanners can discover it.
-# luci.mk below supplies the actual metadata and install rules.
+include $(INCLUDE_DIR)/package.mk
+
 define Package/luci-app-log-viewer
+  SECTION:=luci
+  CATEGORY:=LuCI
+  SUBMENU:=3. Applications
+  TITLE:=REFFIX System, Kernel and Firewall Log Viewer
+  URL:=https://github.com/REFFIX-X/luci-app-log
+  DEPENDS:=+ucode +ucode-mod-fs +libmaxminddb
+  PKGARCH:=all
 endef
 
-include $(TOPDIR)/feeds/luci/luci.mk
+define Package/luci-app-log-viewer/description
+ REFFIX fork of luci-app-log-viewer with System Log, Kernel Log,
+ Firewall Log and optional local GeoLite2 Country/ASN enrichment.
+endef
+
+define Package/luci-app-log-viewer/install
+	$(INSTALL_DIR) $(1)/www
+	$(CP) ./htdocs/* $(1)/www/
+	$(CP) ./root/* $(1)/
+endef
+
+$(eval $(call BuildPackage,luci-app-log-viewer))
