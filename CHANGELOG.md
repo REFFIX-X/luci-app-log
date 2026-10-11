@@ -7,4 +7,4 @@
 - Preserve generic `DROP`/`REJECT` detection, port-probe parsing and local GeoIP enrichment.
 - Include the GeoIP updater validation fix from r16.
 
-Targets: OpenWrt 25.12 APK and OpenWrt 24.10 IPK for `aarch64_cortex-a53`, distributed through the direct-download package mirror and GitHub Releases.
+Targets: OpenWrt 25.12 APK and OpenWrt 24.10 IPK for `aarch64_cortex-a53`, distributed through the direct-download package mirror and GitHub Releases. The release workflow advances the installer mirror only after both builds and publication succeed.
