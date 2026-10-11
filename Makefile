@@ -7,7 +7,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-log-viewer
 PKG_VERSION:=1.5.0
-PKG_RELEASE:=17
+PKG_RELEASE:=18
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=REFFIX
 
