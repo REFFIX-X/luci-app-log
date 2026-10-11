@@ -65,24 +65,28 @@ else
 fi
 
 echo "REFFIX LuCI installer: detected ${PM}, target family ${FAMILY}, architecture ${ARCH}."
-fetch "https://api.github.com/repos/${REPO}/releases?per_page=30" "$TMP/releases.json"
-APP="$TMP/reffix-luci-app-log-viewer.${EXT}"
-LIB="$TMP/reffix-libmaxminddb.${EXT}"
-VERSION=""
-VERSIONS="$(sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\(v[^"]*\)".*/\1/p' "${TMP}/releases.json" | awk '{ a[NR]=$0 } END { for (i=NR; i>0; i--) print a[i] }')"
-for candidate in $VERSIONS; do
-  BASE="https://github.com/${REPO}/releases/download/${candidate}"
-  if fetch "$BASE/reffix-libmaxminddb-openwrt-${FAMILY}.${EXT}" "$LIB" &&
-     fetch "$BASE/reffix-luci-app-log-viewer-openwrt-${FAMILY}.${EXT}" "$APP"; then
-    VERSION="$candidate"
-    break
-  fi
-done
-if [ -z "$VERSION" ]; then
-  echo "ERROR: no GitHub release has packages for OpenWrt ${FAMILY} (${EXT}) and this architecture." >&2
+VERSION_FILE="$TMP/latest"
+if ! fetch "https://raw.githubusercontent.com/${REPO}/package-assets/latest" "$VERSION_FILE"; then
+  echo "ERROR: couldn't read the direct-download package index from GitHub." >&2
   exit 1
 fi
-echo "Using package release ${VERSION}."
+VERSION="$(sed -n '1{s/[[:space:]]*$//;p;}' "$VERSION_FILE" | tr -d '\\r')"
+case "$VERSION" in
+  v[0-9]*) ;;
+  *) echo "ERROR: package mirror returned an invalid release version: ${VERSION:-empty}." >&2; exit 1 ;;
+esac
+BASE="https://raw.githubusercontent.com/${REPO}/package-assets/${VERSION}"
+APP="$TMP/reffix-luci-app-log-viewer.${EXT}"
+LIB="$TMP/reffix-libmaxminddb.${EXT}"
+echo "Using package release ${VERSION} via direct raw downloads."
+if ! fetch "$BASE/reffix-libmaxminddb-openwrt-${FAMILY}.${EXT}" "$LIB"; then
+  echo "ERROR: failed to download the matching libmaxminddb package from the direct package mirror." >&2
+  exit 1
+fi
+if ! fetch "$BASE/reffix-luci-app-log-viewer-openwrt-${FAMILY}.${EXT}" "$APP"; then
+  echo "ERROR: failed to download the REFFIX LuCI package from the direct package mirror." >&2
+  exit 1
+fi
 
 echo "Installing GeoIP helper library..."
 if [ "$PM" = apk ]; then
