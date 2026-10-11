@@ -98,9 +98,12 @@ return view.extend({
   maxEntries: 500,
 
   getLogData: function() {
-    return fs.exec_direct('/sbin/logread', ['-e', '(INFRA_PORT_HIT|DROP|REJECT)'], 'text')
+    // Fetch a bounded tail and filter in JavaScript. The -e regex syntax in
+    // OpenWrt logread is not consistently extended regex, so alternation like
+    // (INFRA_PORT_HIT|DROP|REJECT) can match nothing on valid router builds.
+    return fs.exec_direct('/sbin/logread', ['-l', String(MAX_LINES)], 'text')
       .catch(function() {
-        return fs.exec_direct('/usr/sbin/logread', ['-e', '(INFRA_PORT_HIT|DROP|REJECT)'], 'text');
+        return fs.exec_direct('/usr/sbin/logread', ['-l', String(MAX_LINES)], 'text');
       });
   },
 
