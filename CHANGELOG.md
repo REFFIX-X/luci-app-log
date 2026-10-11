@@ -7,4 +7,4 @@
 - Fix uppercase GeoIP country-code matching against locally bundled lowercase flag asset names.
 - Keep policy annotations configurable in `/etc/log-viewer/policies.json`; the app remains read-only and does not edit firewall rules.
 
-Targets: OpenWrt 25.12 APK and OpenWrt 24.10 IPK for `aarch64_cortex-a53`.
+Targets: OpenWrt 25.12 APK and OpenWrt 24.10 IPK for `aarch64_cortex-a53`. Release automation updates the direct-download mirror only after both package builds pass.
