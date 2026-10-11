@@ -54,21 +54,41 @@ function parseFields(line) {
 }
 
 function parseLine(line, index) {
+  const observed = line.includes('INFRA_PORT_HIT:');
+  const hasPacketTuple = /SRC=\S+.*DPT=\d+/.test(line);
+
+  // Recognise both kernel verdict text and explicit log prefixes such as
+  // JELLYFIN_BLOCK:, FIREWALL_BLOCK:, ALLOW: or ACCEPTED:. No service-specific
+  // rules are hardcoded; this only interprets markers already in the log.
+  const blockMarker = /\b(?:DROP|REJECT)\b/i.test(line) ||
+    /(?:^|[\s:])[A-Z0-9_-]*(?:BLOCKED|BLOCK|DROP|REJECT):/i.test(line);
+  const allowMarker =
+    /(?:^|[\s:])[A-Z0-9_-]*(?:ALLOWED|ALLOW|ACCEPTED|ACCEPT|PASSED|PASS):/i.test(line);
+
   let prefix = '';
-  if (line.includes('INFRA_PORT_HIT:')) prefix = 'INFRA_PORT_HIT';
-  else if (/\bDROP\b|\bREJECT\b/i.test(line) && /SRC=\S+.*DPT=\d+/.test(line))
-    prefix = 'FIREWALL_DROP';
+  let kind = '';
+  if (observed) {
+    prefix = 'INFRA_PORT_HIT';
+    kind = 'Observed';
+  }
+  else if (hasPacketTuple && blockMarker) {
+    prefix = 'FIREWALL_BLOCK';
+    kind = 'Blocked';
+  }
+  else if (hasPacketTuple && allowMarker) {
+    prefix = 'FIREWALL_ALLOW';
+    kind = 'Allowed';
+  }
   else return null;
 
   const fields = parseFields(line);
   const port = Number(fields.DPT || 0);
-  const blocked = prefix === 'FIREWALL_DROP' || /\bDROP\b|\bREJECT\b/i.test(line);
   const timestamp = (line.match(/^([A-Z][a-z]{2}\s+\w{3}\s+\d+\s+[\d:]+\s+\d{4})/) || ['', ''])[1];
 
   return {
     id: index,
     timestamp: timestamp || 'Recent',
-    kind: blocked ? 'Blocked' : 'Probe',
+    kind: kind,
     source: fields.SRC || '',
     destination: fields.DST || '',
     dport: port,
@@ -88,7 +108,7 @@ const BUNDLED_FLAGS = new Set('ae au be br ca ch cn cz de es fi fr gb hk id il i
 function countryFlag(code) {
   if (!/^[A-Z]{2}$/.test(code || ''))
     return '<span class="fw-flag-fallback" title="Country unavailable">🌐</span>';
-  if (!BUNDLED_FLAGS.has(code))
+  if (!BUNDLED_FLAGS.has(code.toLowerCase()))
     return '<span class="fw-flag-fallback" title="Flag not bundled for ' + esc(code) + '">🌐</span>';
 
   // Flags are bundled locally. This avoids LuCI CSP restrictions on external image hosts.
@@ -149,7 +169,7 @@ return view.extend({
   renderRows: function() {
     if (!this.tbody) return;
     const query = (this.search.value || '').toLowerCase();
-    const events = this.events.filter(e => {
+    const matching = this.events.filter(e => {
       const geo = this.geoCache[e.source] || {};
       const searchable = [
         e.timestamp, e.kind, e.source, e.destination, e.dport, e.service,
@@ -158,15 +178,17 @@ return view.extend({
       return (this.kindFilter === 'all' || e.kind.toLowerCase() === this.kindFilter) &&
         (this.protoFilter === 'all' || e.protocol.toLowerCase() === this.protoFilter) &&
         searchable.includes(query);
-    }).slice(0, this.maxEntries);
-
-    const blocked = this.events.filter(e => e.kind === 'Blocked').length;
-    const probes = this.events.filter(e => e.kind === 'Probe').length;
-    const countries = new Set(this.events.map(e => (this.geoCache[e.source] || {}).country_code).filter(Boolean)).size;
+    });
+    const events = matching.slice(0, this.maxEntries);
+    const blocked = matching.filter(e => e.kind === 'Blocked').length;
+    const observed = matching.filter(e => e.kind === 'Observed').length;
+    const allowed = matching.filter(e => e.kind === 'Allowed').length;
+    const countries = new Set(matching.map(e => (this.geoCache[e.source] || {}).country_code).filter(Boolean)).size;
     this.stats.innerHTML = [
-      ['EVENTS', events.length],
-      ['LOGGED BLOCKS', blocked],
-      ['PORT PROBES', probes],
+      ['MATCHING EVENTS', matching.length],
+      ['BLOCKED', blocked],
+      ['OBSERVED · VERDICT UNKNOWN', observed],
+      ['ALLOWED · EXPLICIT LOGS', allowed],
       ['COUNTRIES', countries]
     ].map(function(item) {
       return '<div class="fw-stat"><span>' + item[0] + '</span><strong>' + item[1] + '</strong></div>';
@@ -177,20 +199,22 @@ return view.extend({
       const countryCode = (geo.country_code || '').toUpperCase();
       const country = geo.country_name || 'GeoIP unavailable';
       const asn = geo.asn_organization || '';
-      return '<tr class="tr ' + (e.kind === 'Blocked' ? 'fw-blocked' : 'fw-probe') + '">' +
+      const kindClass = e.kind === 'Blocked' ? 'blocked' : (e.kind === 'Allowed' ? 'allowed' : 'observed');
+      return '<tr class="tr fw-' + kindClass + '">' +
         '<td class="td fw-time">' + esc(e.timestamp) + '</td>' +
         '<td class="td fw-source"><span class="fw-flag" title="' + esc(country) + '">' + countryFlag(countryCode) + '</span> ' +
-          '<code>' + esc(e.source) + '</code><small>' + esc(country) + (asn ? ' · ' + esc(asn) : '') + '</small></td>' +
+          '<code>' + esc(e.source) + '</code> <button type="button" class="cbi-button fw-copy-ip" data-ip="' + esc(e.source) + '" title="Copy source IP">Copy</button>' +
+          '<small>' + esc(country) + (asn ? ' · ' + esc(asn) : '') + '</small></td>' +
         '<td class="td"><code>' + esc(e.destination || '—') + '</code></td>' +
         '<td class="td"><strong>' + esc(e.dport || '—') + '</strong><small>' + esc(e.service) + '</small></td>' +
         '<td class="td">' + esc(e.protocol) + '</td>' +
-        '<td class="td"><span class="fw-badge ' + (e.kind === 'Blocked' ? 'danger' : 'probe') + '">' + esc(e.kind) + '</span></td>' +
+        '<td class="td"><span class="fw-badge ' + kindClass + '" title="' + esc(e.prefix) + '">' + esc(e.kind) + '</span></td>' +
         '<td class="td fw-detail">SPT ' + esc(e.sport || '—') + ' · ' + esc(e.flags || '—') +
           '<small>' + esc(e.iface || '—') + (e.ttl ? ' · TTL ' + esc(e.ttl) : '') + '</small></td>' +
         '<td class="td"><a href="https://www.abuseipdb.com/check/' + encodeURIComponent(e.source) +
           '" target="_blank" rel="noreferrer">Reputation ↗</a></td></tr>';
-    }).join('') || '<tr><td colspan="8" class="center">No matching firewall events. Check that your firewall rules log the events you want to see.</td></tr>';
-    this.counter.textContent = events.length + ' shown · ' + this.events.length + ' loaded';
+    }).join('') || '<tr><td colspan="8" class="center">No matching events in the recent log buffer. Only explicitly logged DROP/REJECT/BLOCK and ALLOW/ACCEPT markers can prove a firewall verdict.</td></tr>';
+    this.counter.textContent = events.length + ' shown · ' + matching.length + ' matched · ' + this.events.length + ' loaded';
   },
 
   render: function() {
@@ -200,7 +224,7 @@ return view.extend({
       '.fw-flag{display:inline-flex;min-width:22px;height:16px;margin-right:.25em;align-items:center;justify-content:center;vertical-align:middle}' +
       '.fw-flag-img{display:block;width:20px;max-height:15px;height:auto;object-fit:contain;border:1px solid rgba(127,127,127,.45);border-radius:2px}' +
       '.fw-flag-fallback{font-size:1.1em;line-height:1}' +
-      '.fw-stats{display:grid;grid-template-columns:repeat(4,minmax(8em,1fr));gap:.7em;margin:1em 0}' +
+      '.fw-stats{display:grid;grid-template-columns:repeat(5,minmax(7em,1fr));gap:.7em;margin:1em 0}' +
       '.fw-stat{border:1px solid var(--border-color,#444);border-radius:8px;padding:1em;background:var(--background-color-secondary,#222)}' +
       '.fw-stat span{display:block;font-size:.75em;opacity:.7;letter-spacing:.06em}.fw-stat strong{font-size:1.5em}' +
       '.fw-tablewrap{overflow:auto;max-height:68vh;border:1px solid var(--border-color,#444);border-radius:8px}' +
@@ -208,17 +232,19 @@ return view.extend({
       '.fw-source small,.fw-detail small,.fw-table td:nth-child(4) small{display:block;opacity:.72;margin-top:.25em;font-size:.82em}' +
       '.fw-source code{white-space:nowrap}.fw-time{white-space:nowrap;font-size:.9em}' +
       '.fw-badge{border-radius:5px;padding:.15em .55em;font-size:.85em;font-weight:700;white-space:nowrap}' +
-      '.fw-badge.danger{background:#a52d32;color:#fff}.fw-badge.probe{background:#8a6a08;color:#fff}' +
-      '.fw-blocked{background:rgba(178,45,50,.08)}.fw-probe{background:rgba(194,148,16,.06)}' +
+      '.fw-badge.danger{background:#a52d32;color:#fff}.fw-badge.observed{background:#8a6a08;color:#fff}.fw-badge.allowed{background:#246d49;color:#fff}' +
+      '.fw-blocked{background:rgba(178,45,50,.08)}.fw-observed{background:rgba(194,148,16,.06)}.fw-allowed{background:rgba(36,109,73,.08)}' +
+      '.fw-copy-ip{font-size:.75em;min-height:1.6em;padding:.05em .4em;margin-left:.25em}' +
       '@media(max-width:800px){.fw-stats{grid-template-columns:repeat(2,minmax(8em,1fr))}}'
     ));
 
     this.stats = E('div', {class: 'fw-stats'});
     this.search = E('input', {class: 'cbi-input-text', type: 'search', placeholder: _('Search IP, country, ASN, port or service…')});
     this.kind = E('select', {class: 'cbi-input-select'}, [
-      E('option', {value: 'all'}, _('All event types')),
+      E('option', {value: 'all'}, _('All verdict types')),
       E('option', {value: 'blocked'}, _('Blocked only')),
-      E('option', {value: 'probe'}, _('Probes only'))
+      E('option', {value: 'observed'}, _('Observed · verdict unknown')),
+      E('option', {value: 'allowed'}, _('Allowed · explicit logs only'))
     ]);
     this.proto = E('select', {class: 'cbi-input-select'}, [
       E('option', {value: 'all'}, _('All protocols')),
@@ -236,7 +262,7 @@ return view.extend({
     ]);
 
     const result = E('div', {}, [
-      E('p', {class: 'cbi-section-descr'}, _('Inbound firewall events. GeoIP is local; MAC, TOS and packet-ID noise are omitted. A probe is not proof of a successful connection.')),
+      E('p', {class: 'cbi-section-descr'}, _('Verdicts matter: Blocked requires an explicit DROP/REJECT/BLOCK log. Observed means INFRA_PORT_HIT saw a packet; that logging-only rule does not decide the verdict, and the normal firewall may still drop it later. Allowed appears only when an ALLOW/ACCEPT rule explicitly logs the packet. Silent allowed traffic cannot be inferred here. GeoIP is local; MAC, TOS and packet-ID noise are omitted.')),
       this.stats,
       E('div', {class: 'fw-toolbar'}, [
         this.search, this.kind, this.proto,
@@ -247,6 +273,20 @@ return view.extend({
       E('div', {class: 'fw-tablewrap'}, table)
     ]);
 
+    this.tbody.addEventListener('click', async ev => {
+      const button = ev.target.closest('.fw-copy-ip');
+      if (!button) return;
+      const ip = button.getAttribute('data-ip') || '';
+      try {
+        if (!navigator.clipboard || !navigator.clipboard.writeText)
+          throw new Error('Clipboard API unavailable');
+        await navigator.clipboard.writeText(ip);
+        ui.addNotification(null, E('p', _('Copied IP: ') + ip), 'info');
+      }
+      catch (e) {
+        ui.addNotification(null, E('p', _('Could not copy automatically. Select the IP text manually.')), 'warning');
+      }
+    });
     this.search.addEventListener('input', () => this.renderRows());
     this.kind.addEventListener('change', () => { this.kindFilter = this.kind.value; this.renderRows(); });
     this.proto.addEventListener('change', () => { this.protoFilter = this.proto.value; this.renderRows(); });
@@ -258,10 +298,10 @@ return view.extend({
   },
 
   exportCSV: function() {
-    const rows = [['Time','Source IP','Country','ASN','Destination IP','Destination Port','Service','Protocol','Event','Source Port','Interface']];
+    const rows = [['Time','Source IP','Country','ASN','Destination IP','Destination Port','Service','Protocol','Verdict','Log Marker','Source Port','Interface']];
     this.events.forEach(e => {
       const geo = this.geoCache[e.source] || {};
-      rows.push([e.timestamp,e.source,geo.country_name || '',geo.asn_organization || '',e.destination,e.dport,e.service,e.protocol,e.kind,e.sport,e.iface]);
+      rows.push([e.timestamp,e.source,geo.country_name || '',geo.asn_organization || '',e.destination,e.dport,e.service,e.protocol,e.kind,e.prefix,e.sport,e.iface]);
     });
     const csv = rows.map(r => r.map(v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"').join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], {type: 'text/csv;charset=utf-8'}));

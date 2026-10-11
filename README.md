@@ -5,8 +5,8 @@ A REFFIX-maintained fork of [gSpotx2f/luci-app-log](https://github.com/gSpotx2f/
 ## Features
 
 - Original System Log and Kernel Log pages.
-- **Firewall Log** parses the generic `INFRA_PORT_HIT` and conventional `DROP` / `REJECT` kernel log messages.
-- Readable table with timestamp, source IP, local GeoIP country flag/name and ASN organisation, destination IP, destination port/service, protocol, event type, source port, ingress interface and TCP flags.
+- **Firewall Log** parses generic `INFRA_PORT_HIT`, `DROP` / `REJECT`, and explicitly logged block/allow markers (for example, rules tagged `JELLYFIN_BLOCK`). No Jellyfin-specific logic is hardcoded.
+- Readable table with timestamp, source IP, locally bundled GeoIP country flag/name and ASN organisation, destination IP, destination port/service, protocol, explicit verdict classification, source port, ingress interface and TCP flags. Source IPs can be copied with one click.
 - Filters for event type and TCP/UDP, search across IPs/countries/ASNs/ports/services, CSV export and periodic refresh.
 - GeoIP enrichment uses a local MaxMind GeoLite2 database. No per-IP lookup API is called. Country flag SVGs are bundled locally from the MIT-licensed flag-icons project. The browser loads them from this router, so external image hosts and CSP exceptions are not required.
 - Does not add or modify firewall rules.
@@ -65,3 +65,12 @@ Monthly updates are a reasonable starting point. GeoIP is approximate; VPNs, pro
 - Designed for LuCI / OpenWrt >= 22.03. The automated build validates the source and creates packages for OpenWrt 25.12 and 24.10 on `aarch64_cortex-a53`. Hardware testing and compatibility with other release series, architectures, and third-party firmware builds are not yet guaranteed.
 - Upstream project: https://github.com/gSpotx2f/luci-app-log
 - The original project is MIT-licensed; preserve its license and attribution. GeoLite2 data terms are separate from the app's license.
+
+
+## Verdict semantics
+
+- **Blocked** is shown only when a log line explicitly identifies DROP, REJECT or a block marker (for example, `JELLYFIN_BLOCK:`).
+- **Observed** means an `INFRA_PORT_HIT` watch rule logged the packet. This logging-only rule returns and does not itself decide the firewall verdict. The normal default-deny policy can still drop the packet later.
+- **Allowed** is shown only when a firewall rule emits an explicit ALLOW/ACCEPT marker. Traffic that is allowed silently is not visible as an allowed event.
+
+The app parses logs only. It does not change firewall policy or rules.
