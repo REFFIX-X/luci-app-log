@@ -104,16 +104,8 @@ jobs:
           cp dist/* "package-mirror/${TAG}/"
           CURRENT_LATEST=""
           if [ -f package-mirror/latest ]; then CURRENT_LATEST="$(cat package-mirror/latest)"; fi
-          TAG_NUM="${TAG##*-r}"
-          LATEST_NUM=0
-          case "$CURRENT_LATEST" in
-            v1.5.0-r[0-9]*) LATEST_NUM="${CURRENT_LATEST##*-r}" ;;
-          esac
-          case "$TAG_NUM" in
-            ""|*[!0-9]*) echo "Invalid release tag number: $TAG" >&2; exit 1 ;;
-          esac
-          if [ "$TAG_NUM" -ge "$LATEST_NUM" ]; then
-            echo "$TAG" > package-mirror/latest
+          if [ -z "$CURRENT_LATEST" ] || [ "$(printf '%s\n%s\n' "$CURRENT_LATEST" "$TAG" | sort -V | tail -n1)" = "$TAG" ]; then
+            printf '%s\n' "$TAG" > package-mirror/latest
           else
             echo "Keeping newer package marker $CURRENT_LATEST; not downgrading it to $TAG."
           fi
@@ -133,17 +125,16 @@ jobs:
           TAG="${SUBJECT#release: }"
           case "$TAG" in v*) ;; *) echo "Release commit must start with 'release: v'" >&2; exit 1 ;; esac
           cat > "$RUNNER_TEMP/release-notes.md" <<EOF
-          # REFFIX luci-app-log ${TAG}
+          # REFFIX Log Viewer ${TAG}
 
-          Standalone package release for OpenWrt routers with the aarch64_cortex-a53 package architecture, including GL.iNet Flint4 / MediaTek Filogic.
+          Standalone OpenWrt packages for aarch64_cortex-a53 routers, including GL.iNet Flint4 / MediaTek Filogic.
 
-          ## Assets
-          - OpenWrt 25.12 APK package and matching libmaxminddb dependency.
-          - OpenWrt 24.10 IPK package and matching libmaxminddb dependency.
+          Assets:
+          - OpenWrt 25.12 APK app and matching libmaxminddb helper.
+          - OpenWrt 24.10 IPK app and matching libmaxminddb helper.
           - SHA-256 checksums for both package pairs.
 
-          The app package includes the original System Log and Kernel Log pages plus the Firewall Log add-on. It uses the existing package name, so it upgrades/replaces an existing luci-app-log-viewer installation in place; uninstalling first is not required.
-
-          This build is automated and source-validated. Router-side testing is still recommended before production deployment. GeoLite2 databases are downloaded separately at install time and are not bundled.
+          The existing luci-app-log-viewer package name is retained for in-place upgrades.
+          The release is source-validated; test on-router before production use. GeoLite2 data is downloaded separately.
           EOF
-          gh release create "$TAG" dist/* --target "$GITHUB_SHA" --prerelease --title "$TAG - REFFIX LuCI Firewall Log" --notes-file "$RUNNER_TEMP/release-notes.md"
+          gh release create "$TAG" dist/* --target "$GITHUB_SHA" --prerelease --title "$TAG - REFFIX Log Viewer" --notes-file "$RUNNER_TEMP/release-notes.md"
