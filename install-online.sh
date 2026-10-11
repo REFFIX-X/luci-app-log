@@ -22,9 +22,29 @@ fetch() {
 
 if command -v apk >/dev/null 2>&1; then
   ARCH="$(apk --print-arch 2>/dev/null || true)"
+  # apk may report the generic CPU architecture ("aarch64") rather than
+  # OpenWrt's package-feed architecture ("aarch64_cortex-a53"). On APK-based
+  # OpenWrt, confirm the release/target before mapping that generic name.
+  if [ -r /etc/openwrt_release ]; then
+    . /etc/openwrt_release
+  fi
   case "$ARCH" in
     aarch64_cortex-a53*) FAMILY=25.12; EXT=apk ;;
-    *) echo "ERROR: unsupported APK architecture: ${ARCH:-unknown}. Current release assets target aarch64_cortex-a53 (GL.iNet Flint4 / mediatek filogic)." >&2; exit 1 ;;
+    aarch64)
+      case "${DISTRIB_RELEASE:-}:${DISTRIB_TARGET:-}" in
+        25.12*:mediatek/filogic*|SNAPSHOT:mediatek/filogic*)
+          FAMILY=25.12; EXT=apk
+          ;;
+        *)
+          echo "ERROR: apk reports generic architecture aarch64, but this installer only supports OpenWrt 25.12 on mediatek/filogic. Detected release=${DISTRIB_RELEASE:-unknown}, target=${DISTRIB_TARGET:-unknown}." >&2
+          exit 1
+          ;;
+      esac
+      ;;
+    *)
+      echo "ERROR: unsupported APK architecture: ${ARCH:-unknown}. Supported target: OpenWrt 25.12 mediatek/filogic (aarch64 Cortex-A53)." >&2
+      exit 1
+      ;;
   esac
   PM=apk
 elif command -v opkg >/dev/null 2>&1; then
