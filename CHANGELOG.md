@@ -1,12 +1,9 @@
 # Changelog
 
-## v1.5.0-r28 - 2026-10-11
+## v2.0.0
 
-- Apply a cohesive Monokai Pro-inspired colorway to the Firewall Log: warm charcoal canvas, deep aubergine panels, warm white text, yellow, pink, orange, green, cyan and purple accents.
-- Replace layered contrast overrides with one scoped theme block, preserving the dashboard layout and avoiding unintended styling changes to the rest of LuCI.
-- Improve panel, table, stat, toolbar, link, scan-signal and verdict badge contrast; retain clear text sizing and responsive layout.
-- No changes to firewall rules, policy behavior, event parsing or GeoIP sources.
-
-Palette reference: Monokai Pro public theme colors; this is an original dashboard CSS adaptation, not bundled editor-theme code.
-
-Targets: OpenWrt 25.12 APK and OpenWrt 24.10 IPK for `aarch64_cortex-a53`.
+- Establishes REFFIX's own v2 release line.
+- Reduces Firewall Log typography by one step across the event table, toolbar, statistics and insight panels.
+- Prevents destination IP addresses from wrapping inside table cells.
+- Makes the online installer fall back to GitHub release assets when the raw-content package index cannot be fetched.
+- Keeps the existing `luci-app-log-viewer` package identity for in-place upgrades.
