@@ -74,3 +74,26 @@ Monthly updates are a reasonable starting point. GeoIP is approximate; VPNs, pro
 - **Allowed** is shown only when a firewall rule emits an explicit ALLOW/ACCEPT marker. Traffic that is allowed silently is not visible as an allowed event.
 
 The app parses logs only. It does not change firewall policy or rules.
+
+
+## Firewall Log controls and verdicts
+
+- **Blocked** requires explicit DROP/REJECT or a block marker in the log.
+- **Observed** means `INFRA_PORT_HIT` logged a packet. Your watch rule returns, so this is not itself a block verdict; normal firewall processing and default-deny policy run separately.
+- **Allowed** appears only when a rule emits an explicit ALLOW/ACCEPT marker. Silent allowed traffic cannot be inferred from absence of a drop.
+- Time filters limit the displayed recent buffer. Pause live refresh to inspect rows.
+- Top sources, destination ports and GeoIP-resolved ASNs summarize the selected time window. GeoIP enrichment is capped at 60 unique source IPs per refresh to keep router load sensible.
+- Scan/burst signals are heuristics, not proof of malicious activity: a source is flagged at 8 or more distinct destination ports or 25 or more logged events in the selected window.
+- CSV includes the parsed verdict, original log marker and optional policy label/note.
+
+### Optional local policy labels
+
+The package includes an example configuration at `/usr/share/log-viewer/policies.example.json`. To activate and customize it:
+
+```sh
+mkdir -p /etc/log-viewer
+cp /usr/share/log-viewer/policies.example.json /etc/log-viewer/policies.json
+vi /etc/log-viewer/policies.json
+```
+
+The sample includes labels for `JELLYFIN_BLOCK`, `JELLYFIN_ALLOW` and `INFRA_PORT_HIT`. These labels only annotate log entries; they do not add or modify firewall rules. `JELLYFIN_ALLOW` events appear only if your allow rule emits that marker.

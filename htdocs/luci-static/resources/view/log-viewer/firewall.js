@@ -56,14 +56,12 @@ function parseFields(line) {
 function parseLine(line, index) {
   const observed = line.includes('INFRA_PORT_HIT:');
   const hasPacketTuple = /SRC=\S+.*DPT=\d+/.test(line);
-
-  // Recognise both kernel verdict text and explicit log prefixes such as
-  // JELLYFIN_BLOCK:, FIREWALL_BLOCK:, ALLOW: or ACCEPTED:. No service-specific
-  // rules are hardcoded; this only interprets markers already in the log.
   const blockMarker = /\b(?:DROP|REJECT)\b/i.test(line) ||
     /(?:^|[\s:])[A-Z0-9_-]*(?:BLOCKED|BLOCK|DROP|REJECT):/i.test(line);
   const allowMarker =
     /(?:^|[\s:])[A-Z0-9_-]*(?:ALLOWED|ALLOW|ACCEPTED|ACCEPT|PASSED|PASS):/i.test(line);
+  const markerMatch = line.match(/(?:^|\s)([A-Z][A-Z0-9_-]{1,39}):/);
+  const marker = markerMatch ? markerMatch[1] : '';
 
   let prefix = '';
   let kind = '';
@@ -84,10 +82,12 @@ function parseLine(line, index) {
   const fields = parseFields(line);
   const port = Number(fields.DPT || 0);
   const timestamp = (line.match(/^([A-Z][a-z]{2}\s+\w{3}\s+\d+\s+[\d:]+\s+\d{4})/) || ['', ''])[1];
+  const timestampMs = timestamp ? Date.parse(timestamp) : NaN;
 
   return {
     id: index,
     timestamp: timestamp || 'Recent',
+    timestampMs: Number.isFinite(timestampMs) ? timestampMs : null,
     kind: kind,
     source: fields.SRC || '',
     destination: fields.DST || '',
@@ -99,7 +99,10 @@ function parseLine(line, index) {
     ttl: fields.TTL || '',
     flags: line.includes('SYN') ? 'SYN' : line.includes('RST') ? 'RST' :
       (fields.PROTO === 'UDP' ? 'UDP packet' : ''),
-    prefix: prefix
+    prefix: prefix,
+    marker: marker || prefix,
+    policyLabel: '',
+    policyNote: ''
   };
 }
 
@@ -124,6 +127,10 @@ return view.extend({
   geoCache: {},
   kindFilter: 'all',
   protoFilter: 'all',
+  timeFilter: 'all',
+  paused: false,
+  policyRules: [],
+  policyRulesLoaded: false,
   maxEntries: 500,
 
   getLogData: function() {
@@ -135,6 +142,150 @@ return view.extend({
         return fs.exec_direct('/usr/sbin/logread', ['-l', String(MAX_LINES)], 'text');
       });
   },
+
+  loadPolicyRules: async function() {
+    if (this.policyRulesLoaded) return;
+    this.policyRulesLoaded = true;
+    try {
+      const raw = await fs.read('/etc/log-viewer/policies.json');
+      const config = JSON.parse(raw || '{}');
+      this.policyRules = Array.isArray(config.policies) ? config.policies : [];
+    }
+    catch (e) {
+      this.policyRules = [];
+    }
+  },
+
+  applyPolicy: function(event) {
+    const marker = String(event.marker || event.prefix || '').toUpperCase();
+    const rule = this.policyRules.find(p =>
+      p && String(p.marker || '').toUpperCase() === marker &&
+      (p.port == null || Number(p.port) === Number(event.dport))
+    );
+    if (rule) {
+      event.policyLabel = String(rule.label || marker);
+      event.policyNote = String(rule.note || '');
+    }
+    return event;
+  },
+
+  getTimeWindowMs: function() {
+    return ({
+      '5m': 5 * 60 * 1000,
+      '15m': 15 * 60 * 1000,
+      '1h': 60 * 60 * 1000,
+      '6h': 6 * 60 * 60 * 1000,
+      '24h': 24 * 60 * 60 * 1000
+    })[this.timeFilter] || 0;
+  },
+
+  renderInsights: function(events) {
+    const sources = new Map();
+    const ports = new Map();
+    const asns = new Map();
+
+    events.forEach(e => {
+      if (e.source) {
+        if (!sources.has(e.source))
+          sources.set(e.source, { source: e.source, count: 0, ports: new Set(), last: e.timestamp });
+        const s = sources.get(e.source);
+        s.count++;
+        if (e.dport) s.ports.add(e.dport);
+        if (e.timestampMs && (!s.lastMs || e.timestampMs > s.lastMs)) {
+          s.lastMs = e.timestampMs;
+          s.last = e.timestamp;
+        }
+      }
+
+      if (e.dport) {
+        const key = String(e.dport);
+        if (!ports.has(key))
+          ports.set(key, { port: e.dport, service: e.service, count: 0, tcp: 0, udp: 0 });
+        const p = ports.get(key);
+        p.count++;
+        if (e.protocol === 'TCP') p.tcp++;
+        if (e.protocol === 'UDP') p.udp++;
+      }
+
+      const geo = this.geoCache[e.source] || {};
+      if (geo.asn_organization) {
+        const key = geo.asn_organization;
+        if (!asns.has(key)) asns.set(key, { name: key, count: 0, sources: new Set() });
+        asns.get(key).count++;
+        asns.get(key).sources.add(e.source);
+      }
+    });
+
+    const top = (map, key, limit) => [...map.values()]
+      .sort((a, b) => b.count - a.count || String(a[key]).localeCompare(String(b[key])))
+      .slice(0, limit);
+    const renderList = (items, render, empty) => items.length
+      ? '<ul class="fw-insight-list">' + items.map(render).join('') + '</ul>'
+      : '<p class="fw-muted">' + empty + '</p>';
+
+    const topSources = renderList(top(sources, 'source', 5), item => {
+      const geo = this.geoCache[item.source] || {};
+      const label = geo.country_name || 'GeoIP pending';
+      const asn = geo.asn_organization ? ' · ' + geo.asn_organization : '';
+      return '<li><code>' + esc(item.source) + '</code><span>' + item.count + ' events</span>' +
+        '<small>' + esc(label + asn) + ' · ' + item.ports.size + ' ports</small></li>';
+    }, 'No sources in this window.');
+
+    const topPorts = renderList(top(ports, 'port', 5), item =>
+      '<li><strong>' + esc(item.port) + ' · ' + esc(item.service) + '</strong><span>' + item.count + ' events</span>' +
+      '<small>TCP ' + item.tcp + ' · UDP ' + item.udp + '</small></li>',
+      'No destination ports in this window.');
+
+    const topAsns = renderList(top(asns, 'name', 5), item =>
+      '<li><strong>' + esc(item.name) + '</strong><span>' + item.count + ' events</span>' +
+      '<small>' + item.sources.size + ' source IPs · based on local GeoIP matches</small></li>',
+      'No ASN data yet. GeoIP enrichment currently checks up to 60 unique recent sources.');
+
+    const scanMap = new Map();
+    events.forEach(e => {
+      if (!isPublic(e.source)) return;
+      if (!scanMap.has(e.source))
+        scanMap.set(e.source, { source: e.source, count: 0, ports: new Set(), destinations: new Set(), blocked: 0, observed: 0 });
+      const s = scanMap.get(e.source);
+      s.count++;
+      if (e.dport) s.ports.add(e.dport);
+      if (e.destination) s.destinations.add(e.destination);
+      if (e.kind === 'Blocked') s.blocked++;
+      if (e.kind === 'Observed') s.observed++;
+    });
+    const signals = [...scanMap.values()].map(s => {
+      const multiPort = s.ports.size >= 8;
+      const burst = s.count >= 25;
+      return Object.assign(s, {
+        multiPort: multiPort,
+        burst: burst,
+        signal: multiPort && burst ? 'Multi-port + burst' :
+          multiPort ? 'Multi-port pattern' : 'High-volume burst'
+      });
+    }).filter(s => s.multiPort || s.burst)
+      .sort((a, b) => (b.ports.size * 2 + b.count) - (a.ports.size * 2 + a.count))
+      .slice(0, 6);
+
+    const scanHtml = renderList(signals, item => {
+      const geo = this.geoCache[item.source] || {};
+      const details = item.ports.size + ' ports · ' + item.destinations.size + ' targets · ' +
+        item.count + ' events';
+      return '<li><code>' + esc(item.source) + '</code><span class="fw-signal">' + esc(item.signal) + '</span>' +
+        '<small>' + esc(details) + ' · ' + esc(geo.country_name || 'GeoIP pending') + '</small></li>';
+    }, 'No scan/burst thresholds triggered in this window.');
+
+    const policyNotes = this.policyRules.length
+      ? 'Local policy labels active: ' + this.policyRules.length
+      : 'Optional policy labels: copy the example config to /etc/log-viewer/policies.json and edit it for your rules.';
+    return '<div class="fw-insight"><h3>Top sources</h3>' + topSources + '</div>' +
+      '<div class="fw-insight"><h3>Top destination ports</h3>' + topPorts + '</div>' +
+      '<div class="fw-insight"><h3>Top ASNs</h3>' + topAsns + '</div>' +
+      '<div class="fw-insight"><h3>Scan / burst signals</h3><p class="fw-muted">Heuristic only: 8+ ports or 25+ events from one public source.</p>' + scanHtml + '</div>' +
+      '<div class="fw-insight fw-insight-policy"><h3>Policy context</h3><p class="fw-muted">' + esc(policyNotes) + '</p>' +
+      '<p class="fw-muted">Observed ≠ allowed. Blocked and Allowed require explicit log evidence; default-deny policy isn't inferred from silence.</p></div>';
+  },
+
+
 
   lookupGeo: async function(ip) {
     if (!isPublic(ip)) return {};
@@ -158,22 +309,33 @@ return view.extend({
   },
 
   refreshEvents: async function() {
+    await this.loadPolicyRules();
     const raw = await this.getLogData();
     const lines = (raw || '').trim().split('\n');
     this.events = lines.map((line, i) => parseLine(line, i + 1))
-      .filter(Boolean).slice(-MAX_LINES).reverse();
+      .filter(Boolean).map(e => this.applyPolicy(e)).slice(-MAX_LINES).reverse();
     await this.enrich(this.events.slice(0, 60));
+    this.statusText.textContent = (this.paused ? _('Paused') : _('Live · updated ')) +
+      (new Date()).toLocaleTimeString();
     this.renderRows();
   },
 
   renderRows: function() {
     if (!this.tbody) return;
     const query = (this.search.value || '').toLowerCase();
-    const matching = this.events.filter(e => {
+    const windowMs = this.getTimeWindowMs();
+    const now = Date.now();
+    const windowed = this.events.filter(e => {
+      if (!windowMs || !e.timestampMs) return true;
+      const age = now - e.timestampMs;
+      return age >= -60000 && age <= windowMs;
+    });
+    const matching = windowed.filter(e => {
       const geo = this.geoCache[e.source] || {};
       const searchable = [
         e.timestamp, e.kind, e.source, e.destination, e.dport, e.service,
-        e.protocol, e.prefix, geo.country_name, geo.country_code, geo.asn_organization
+        e.protocol, e.prefix, e.marker, e.policyLabel, e.policyNote,
+        geo.country_name, geo.country_code, geo.asn_organization
       ].join(' ').toLowerCase();
       return (this.kindFilter === 'all' || e.kind.toLowerCase() === this.kindFilter) &&
         (this.protoFilter === 'all' || e.protocol.toLowerCase() === this.protoFilter) &&
@@ -183,9 +345,11 @@ return view.extend({
     const blocked = matching.filter(e => e.kind === 'Blocked').length;
     const observed = matching.filter(e => e.kind === 'Observed').length;
     const allowed = matching.filter(e => e.kind === 'Allowed').length;
+    const uniqueSources = new Set(matching.map(e => e.source).filter(Boolean)).size;
     const countries = new Set(matching.map(e => (this.geoCache[e.source] || {}).country_code).filter(Boolean)).size;
     this.stats.innerHTML = [
       ['MATCHING EVENTS', matching.length],
+      ['UNIQUE SOURCES', uniqueSources],
       ['BLOCKED', blocked],
       ['OBSERVED · VERDICT UNKNOWN', observed],
       ['ALLOWED · EXPLICIT LOGS', allowed],
@@ -200,6 +364,8 @@ return view.extend({
       const country = geo.country_name || 'GeoIP unavailable';
       const asn = geo.asn_organization || '';
       const kindClass = e.kind === 'Blocked' ? 'blocked' : (e.kind === 'Allowed' ? 'allowed' : 'observed');
+      const policyText = e.policyLabel || e.marker || e.prefix;
+      const title = [e.marker || e.prefix, e.policyNote].filter(Boolean).join(' · ');
       return '<tr class="tr fw-' + kindClass + '">' +
         '<td class="td fw-time">' + esc(e.timestamp) + '</td>' +
         '<td class="td fw-source"><span class="fw-flag" title="' + esc(country) + '">' + countryFlag(countryCode) + '</span> ' +
@@ -208,13 +374,14 @@ return view.extend({
         '<td class="td"><code>' + esc(e.destination || '—') + '</code></td>' +
         '<td class="td"><strong>' + esc(e.dport || '—') + '</strong><small>' + esc(e.service) + '</small></td>' +
         '<td class="td">' + esc(e.protocol) + '</td>' +
-        '<td class="td"><span class="fw-badge ' + kindClass + '" title="' + esc(e.prefix) + '">' + esc(e.kind) + '</span></td>' +
+        '<td class="td"><span class="fw-badge ' + kindClass + '" title="' + esc(title) + '">' + esc(e.kind) + '</span><small class="fw-event-policy">' + esc(policyText || '—') + '</small></td>' +
         '<td class="td fw-detail">SPT ' + esc(e.sport || '—') + ' · ' + esc(e.flags || '—') +
-          '<small>' + esc(e.iface || '—') + (e.ttl ? ' · TTL ' + esc(e.ttl) : '') + '</small></td>' +
+          '<small>' + esc(e.iface || '—') + (e.ttl ? ' · TTL ' + esc(e.ttl) : '') + (e.policyNote ? ' · ' + esc(e.policyNote) : '') + '</small></td>' +
         '<td class="td"><a href="https://www.abuseipdb.com/check/' + encodeURIComponent(e.source) +
           '" target="_blank" rel="noreferrer">Reputation ↗</a></td></tr>';
-    }).join('') || '<tr><td colspan="8" class="center">No matching events in the recent log buffer. Only explicitly logged DROP/REJECT/BLOCK and ALLOW/ACCEPT markers can prove a firewall verdict.</td></tr>';
-    this.counter.textContent = events.length + ' shown · ' + matching.length + ' matched · ' + this.events.length + ' loaded';
+    }).join('') || '<tr><td colspan="8" class="center">No matching events in the selected window. Only explicitly logged DROP/REJECT/BLOCK and ALLOW/ACCEPT markers can prove a verdict.</td></tr>';
+    this.counter.textContent = events.length + ' shown · ' + matching.length + ' matched · ' + windowed.length + ' in window · ' + this.events.length + ' loaded';
+    if (this.insights) this.insights.innerHTML = this.renderInsights(windowed);
   },
 
   render: function() {
@@ -235,7 +402,8 @@ return view.extend({
       '.fw-badge.danger{background:#a52d32;color:#fff}.fw-badge.observed{background:#8a6a08;color:#fff}.fw-badge.allowed{background:#246d49;color:#fff}' +
       '.fw-blocked{background:rgba(178,45,50,.08)}.fw-observed{background:rgba(194,148,16,.06)}.fw-allowed{background:rgba(36,109,73,.08)}' +
       '.fw-copy-ip{font-size:.75em;min-height:1.6em;padding:.05em .4em;margin-left:.25em}' +
-      '@media(max-width:800px){.fw-stats{grid-template-columns:repeat(2,minmax(8em,1fr))}}'
+      '@media(max-width:1100px){.fw-stats{grid-template-columns:repeat(3,minmax(7em,1fr))}}' +
+      '@media(max-width:800px){.fw-stats{grid-template-columns:repeat(2,minmax(8em,1fr))}.fw-insights{grid-template-columns:1fr}}'
     ));
 
     this.stats = E('div', {class: 'fw-stats'});
@@ -251,8 +419,23 @@ return view.extend({
       E('option', {value: 'tcp'}, 'TCP'),
       E('option', {value: 'udp'}, 'UDP')
     ]);
+    this.window = E('select', {class: 'cbi-input-select', title: _('Filter events by log timestamp')}, [
+      E('option', {value: 'all'}, _('All loaded')),
+      E('option', {value: '5m'}, _('Last 5 minutes')),
+      E('option', {value: '15m'}, _('Last 15 minutes')),
+      E('option', {value: '1h'}, _('Last hour')),
+      E('option', {value: '6h'}, _('Last 6 hours')),
+      E('option', {value: '24h'}, _('Last 24 hours'))
+    ]);
     this.counter = E('span', {class: 'right'});
+    this.statusText = E('span', {class: 'fw-muted'});
+    this.pauseButton = E('button', {class: 'cbi-button', click: () => {
+      this.paused = !this.paused;
+      this.pauseButton.textContent = this.paused ? _('Resume live') : _('Pause live');
+      this.statusText.textContent = this.paused ? _('Auto-refresh paused') : _('Auto-refresh every 15s');
+    }}, _('Pause live'));
     this.tbody = E('tbody');
+    this.insights = E('div', {class: 'fw-insights'});
 
     const table = E('table', {class: 'table fw-table'}, [
       E('thead', {}, E('tr', {class: 'tr table-titles'},
@@ -262,14 +445,17 @@ return view.extend({
     ]);
 
     const result = E('div', {}, [
-      E('p', {class: 'cbi-section-descr'}, _('Verdicts matter: Blocked requires an explicit DROP/REJECT/BLOCK log. Observed means INFRA_PORT_HIT saw a packet; that logging-only rule does not decide the verdict, and the normal firewall may still drop it later. Allowed appears only when an ALLOW/ACCEPT rule explicitly logs the packet. Silent allowed traffic cannot be inferred here. GeoIP is local; MAC, TOS and packet-ID noise are omitted.')),
+      E('p', {class: 'cbi-section-descr'}, _('Verdicts matter: Blocked requires explicit DROP/REJECT/BLOCK evidence. Observed means INFRA_PORT_HIT saw a packet, but final verdict is unknown because that watch rule returns and normal firewall policy handles it. Allowed appears only when an ALLOW/ACCEPT rule explicitly logs. Select a time window, pause live refresh, inspect top sources/ports/ASNs and scan-like bursts. GeoIP is local; MAC, TOS and packet-ID noise are omitted.')),
       this.stats,
       E('div', {class: 'fw-toolbar'}, [
-        this.search, this.kind, this.proto,
+        this.search, this.kind, this.proto, this.window,
         E('button', {class: 'cbi-button cbi-button-action', click: () => this.refreshEvents().catch(e => ui.addNotification(null, E('p', e.message), 'error'))}, _('Refresh')),
+        this.pauseButton,
         E('button', {class: 'cbi-button', click: () => this.exportCSV()}, _('Export CSV')),
-        this.counter
+        this.counter,
+        this.statusText
       ]),
+      this.insights,
       E('div', {class: 'fw-tablewrap'}, table)
     ]);
 
@@ -290,18 +476,21 @@ return view.extend({
     this.search.addEventListener('input', () => this.renderRows());
     this.kind.addEventListener('change', () => { this.kindFilter = this.kind.value; this.renderRows(); });
     this.proto.addEventListener('change', () => { this.protoFilter = this.proto.value; this.renderRows(); });
+    this.window.addEventListener('change', () => { this.timeFilter = this.window.value; this.renderRows(); });
+    this.statusText.textContent = _('Auto-refresh every 15s');
     this.refreshEvents().catch(e => ui.addNotification(null, E('p', _('Unable to load firewall events: ') + e.message), 'error'));
     this.timer = setInterval(() => {
-      if (document.visibilityState === 'visible') this.refreshEvents().catch(() => {});
+      if (!this.paused && document.visibilityState === 'visible')
+        this.refreshEvents().catch(() => {});
     }, 15000);
     return result;
   },
 
   exportCSV: function() {
-    const rows = [['Time','Source IP','Country','ASN','Destination IP','Destination Port','Service','Protocol','Verdict','Log Marker','Source Port','Interface']];
+    const rows = [['Time','Source IP','Country','ASN','Destination IP','Destination Port','Service','Protocol','Verdict','Log Marker','Policy Label','Policy Note','Source Port','Interface']];
     this.events.forEach(e => {
       const geo = this.geoCache[e.source] || {};
-      rows.push([e.timestamp,e.source,geo.country_name || '',geo.asn_organization || '',e.destination,e.dport,e.service,e.protocol,e.kind,e.prefix,e.sport,e.iface]);
+      rows.push([e.timestamp,e.source,geo.country_name || '',geo.asn_organization || '',e.destination,e.dport,e.service,e.protocol,e.kind,e.marker || e.prefix,e.policyLabel || '',e.policyNote || '',e.sport,e.iface]);
     });
     const csv = rows.map(r => r.map(v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"').join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], {type: 'text/csv;charset=utf-8'}));

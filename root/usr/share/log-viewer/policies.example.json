@@ -1,0 +1,33 @@
+{
+  "policies": [
+    {
+      "marker": "JELLYFIN_BLOCK",
+      "port": 8096,
+      "label": "Jellyfin · inbound blocked",
+      "note": "Source matched the custom Jellyfin block rule. Verify the logged DROP verdict."
+    },
+    {
+      "marker": "JELLYFIN_BLOCK",
+      "port": 8920,
+      "label": "Jellyfin TLS · inbound blocked",
+      "note": "Source matched the custom Jellyfin block rule. Verify the logged DROP verdict."
+    },
+    {
+      "marker": "JELLYFIN_ALLOW",
+      "port": 8096,
+      "label": "Fibia → Jellyfin",
+      "note": "Shown only if the allow rule explicitly logs this marker; absence does not mean the exception is broken."
+    },
+    {
+      "marker": "JELLYFIN_ALLOW",
+      "port": 8920,
+      "label": "Fibia → Jellyfin TLS",
+      "note": "Shown only if the allow rule explicitly logs this marker; absence does not mean the exception is broken."
+    },
+    {
+      "marker": "INFRA_PORT_HIT",
+      "label": "Infrastructure watchlist",
+      "note": "Logging-only match. It does not by itself block the packet or establish the final verdict."
+    }
+  ]
+}

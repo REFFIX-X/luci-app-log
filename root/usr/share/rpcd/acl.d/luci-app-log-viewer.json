@@ -2,17 +2,40 @@
   "luci-app-log-viewer": {
     "description": "Grant access to log-viewer procedures",
     "read": {
-      "cgi-io": ["exec"],
+      "cgi-io": [
+        "exec"
+      ],
       "file": {
-        "/sbin/logread*": ["exec"],
-        "/usr/sbin/logread*": ["exec"],
-        "/bin/dmesg -r": ["exec"],
-        "/usr/bin/flint4-geoip": ["exec"],
-        "/usr/libexec/logread-ubox*": ["exec"]
+        "/sbin/logread*": [
+          "exec"
+        ],
+        "/usr/sbin/logread*": [
+          "exec"
+        ],
+        "/bin/dmesg -r": [
+          "exec"
+        ],
+        "/usr/bin/flint4-geoip": [
+          "exec"
+        ],
+        "/usr/libexec/logread-ubox*": [
+          "exec"
+        ],
+        "/etc/log-viewer/policies.json": [
+          "read"
+        ]
       },
       "ubus": {
-        "system": ["info"],
-        "luci.log-viewer": ["getSyslogSize", "getSyslogHash", "getDmesgSize", "getDmesgHash", "getLogfileSize"]
+        "system": [
+          "info"
+        ],
+        "luci.log-viewer": [
+          "getSyslogSize",
+          "getSyslogHash",
+          "getDmesgSize",
+          "getDmesgHash",
+          "getLogfileSize"
+        ]
       }
     }
   }
