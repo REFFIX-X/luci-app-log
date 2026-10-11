@@ -103,13 +103,13 @@ jobs:
             git -C package-mirror init -b package-assets
           fi
           # Drop every pre-v2 package directory; the mirror now serves only this release.
-          find package-mirror -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} +
+          find package-mirror -mindepth 1 -maxdepth 1 -type d ! -name .git -exec rm -rf {} +
           mkdir -p "package-mirror/${TAG}"
           cp dist/* "package-mirror/${TAG}/"
           printf '%s\n' "$TAG" > package-mirror/latest
           git -C package-mirror config user.name "github-actions[bot]"
           git -C package-mirror config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C package-mirror add -- "$TAG" latest
+          git -C package-mirror add -A
           git -C package-mirror commit -m "Publish OpenWrt packages for ${TAG}"
           git -C package-mirror push "$REMOTE" HEAD:package-assets
 
@@ -149,8 +149,11 @@ jobs:
           done < <(gh release list --limit 1000 --json tagName --jq '.[].tagName')
 
           # Also remove orphaned old release tags that no longer have a GitHub Release.
+          EXISTING_TAGS="$(gh api --paginate "repos/$GITHUB_REPOSITORY/tags" --jq '.[].name')"
           while IFS= read -r OLD_TAG; do
             [ -n "$OLD_TAG" ] || continue
             [ "$OLD_TAG" = "$TAG" ] && continue
             gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$OLD_TAG" >/dev/null 2>&1 || true
-          done < <(gh api --paginate "repos/$GITHUB_REPOSITORY/tags" --jq '.[].name')
+          done <<EOF
+          $EXISTING_TAGS
+          EOF
