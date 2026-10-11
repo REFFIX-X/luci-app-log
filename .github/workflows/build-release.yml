@@ -102,7 +102,7 @@ jobs:
           fi
           mkdir -p "package-mirror/${TAG}"
           cp dist/* "package-mirror/${TAG}/"
-          printf '%s\\n' "$TAG" > package-mirror/latest
+          echo "$TAG" > package-mirror/latest
           git -C package-mirror config user.name "github-actions[bot]"
           git -C package-mirror config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git -C package-mirror add -- "$TAG" latest
