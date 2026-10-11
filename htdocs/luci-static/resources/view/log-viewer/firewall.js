@@ -315,8 +315,9 @@ return view.extend({
     this.events = lines.map((line, i) => parseLine(line, i + 1))
       .filter(Boolean).map(e => this.applyPolicy(e)).slice(-MAX_LINES).reverse();
     await this.enrich(this.events.slice(0, 60));
-    this.statusText.textContent = (this.paused ? _('Paused') : _('Live · updated ')) +
-      (new Date()).toLocaleTimeString();
+    this.statusText.textContent = this.paused
+      ? _('Auto-refresh paused · manually refreshed at ') + (new Date()).toLocaleTimeString()
+      : _('Live · updated ') + (new Date()).toLocaleTimeString();
     this.renderRows();
   },
 
@@ -391,7 +392,15 @@ return view.extend({
       '.fw-flag{display:inline-flex;min-width:22px;height:16px;margin-right:.25em;align-items:center;justify-content:center;vertical-align:middle}' +
       '.fw-flag-img{display:block;width:20px;max-height:15px;height:auto;object-fit:contain;border:1px solid rgba(127,127,127,.45);border-radius:2px}' +
       '.fw-flag-fallback{font-size:1.1em;line-height:1}' +
-      '.fw-stats{display:grid;grid-template-columns:repeat(5,minmax(7em,1fr));gap:.7em;margin:1em 0}' +
+      '.fw-stats{display:grid;grid-template-columns:repeat(6,minmax(7em,1fr));gap:.7em;margin:1em 0}' +
+      '.fw-insights{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.7em;margin:.7em 0 1em}' +
+      '.fw-insight{border:1px solid var(--border-color,#444);border-radius:8px;padding:.8em;background:var(--background-color-secondary,#222);min-width:0}' +
+      '.fw-insight h3{margin:0 0 .5em;font-size:1em}.fw-insight-policy{grid-column:1 / -1}' +
+      '.fw-insight-list{list-style:none;margin:0;padding:0}' +
+      '.fw-insight-list li{padding:.4em 0;border-bottom:1px solid var(--border-color,#444);display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.15em .7em}' +
+      '.fw-insight-list li:last-child{border-bottom:0}.fw-insight-list li small{grid-column:1 / -1;opacity:.7;overflow-wrap:anywhere}' +
+      '.fw-muted{opacity:.72;font-size:.86em;margin:.35em 0}.fw-signal{font-size:.75em;padding:.1em .4em;border-radius:4px;background:rgba(138,106,8,.22);white-space:nowrap}' +
+      '.fw-event-policy{display:block;font-size:.78em;opacity:.75;max-width:12em;overflow-wrap:anywhere}' +
       '.fw-stat{border:1px solid var(--border-color,#444);border-radius:8px;padding:1em;background:var(--background-color-secondary,#222)}' +
       '.fw-stat span{display:block;font-size:.75em;opacity:.7;letter-spacing:.06em}.fw-stat strong{font-size:1.5em}' +
       '.fw-tablewrap{overflow:auto;max-height:68vh;border:1px solid var(--border-color,#444);border-radius:8px}' +
@@ -399,11 +408,11 @@ return view.extend({
       '.fw-source small,.fw-detail small,.fw-table td:nth-child(4) small{display:block;opacity:.72;margin-top:.25em;font-size:.82em}' +
       '.fw-source code{white-space:nowrap}.fw-time{white-space:nowrap;font-size:.9em}' +
       '.fw-badge{border-radius:5px;padding:.15em .55em;font-size:.85em;font-weight:700;white-space:nowrap}' +
-      '.fw-badge.danger{background:#a52d32;color:#fff}.fw-badge.observed{background:#8a6a08;color:#fff}.fw-badge.allowed{background:#246d49;color:#fff}' +
+      '.fw-badge.danger,.fw-badge.blocked{background:#a52d32;color:#fff}.fw-badge.observed{background:#8a6a08;color:#fff}.fw-badge.allowed{background:#246d49;color:#fff}' +
       '.fw-blocked{background:rgba(178,45,50,.08)}.fw-observed{background:rgba(194,148,16,.06)}.fw-allowed{background:rgba(36,109,73,.08)}' +
       '.fw-copy-ip{font-size:.75em;min-height:1.6em;padding:.05em .4em;margin-left:.25em}' +
-      '@media(max-width:1100px){.fw-stats{grid-template-columns:repeat(3,minmax(7em,1fr))}}' +
-      '@media(max-width:800px){.fw-stats{grid-template-columns:repeat(2,minmax(8em,1fr))}.fw-insights{grid-template-columns:1fr}}'
+      '@media(max-width:1200px){.fw-stats{grid-template-columns:repeat(3,minmax(7em,1fr))}}' +
+      '@media(max-width:800px){.fw-stats{grid-template-columns:repeat(2,minmax(8em,1fr))}.fw-insights{grid-template-columns:1fr}.fw-insight-policy{grid-column:auto}}'
     ));
 
     this.stats = E('div', {class: 'fw-stats'});

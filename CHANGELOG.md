@@ -1,10 +1,10 @@
 # Changelog
 
-## v1.5.0-r23 - 2026-10-11
+## v1.5.0-r24 - 2026-10-11
 
-- Fix JavaScript syntax in the new policy-context help text.
-- Include selectable time windows, pause/resume refresh, top sources/ports/ASNs, scan/burst heuristics, policy-label support and richer CSV export from r22.
-- Fix uppercase GeoIP country-code matching against locally bundled lowercase flag asset names.
-- Keep policy annotations configurable in `/etc/log-viewer/policies.json`; the app remains read-only and does not edit firewall rules.
+- Finish the dashboard visual styling: responsive insights cards, list rows, scan signal badges, policy notes and six responsive KPI cards.
+- Ensure the red Blocked badge is styled separately from the amber Observed badge and green explicit Allowed badge.
+- Improve paused-refresh status feedback after a manual refresh.
+- Includes r23 time filters, pause/resume, top sources/ports/ASNs, scan/burst heuristics, optional local policy labels, copy-IP action and richer CSV.
 
-Targets: OpenWrt 25.12 APK and OpenWrt 24.10 IPK for `aarch64_cortex-a53`. Release automation updates the direct-download mirror only after both package builds pass.
+Targets: OpenWrt 25.12 APK and OpenWrt 24.10 IPK for `aarch64_cortex-a53`.
