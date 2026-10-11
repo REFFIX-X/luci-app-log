@@ -44,7 +44,7 @@ fetch "https://api.github.com/repos/${REPO}/releases?per_page=30" "$TMP/releases
 APP="$TMP/reffix-luci-app-log-viewer.${EXT}"
 LIB="$TMP/reffix-libmaxminddb.${EXT}"
 VERSION=""
-VERSIONS="$(sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"(v[^\"]*)".*/\1/p' "$TMP/releases.json" | awk '{ a[NR]=$0 } END { for (i=NR; i>0; i--) print a[i] }')"
+VERSIONS="$(sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\(v[^"]*\)".*/\1/p' "${TMP}/releases.json" | awk '{ a[NR]=$0 } END { for (i=NR; i>0; i--) print a[i] }')"
 for candidate in $VERSIONS; do
   BASE="https://github.com/${REPO}/releases/download/${candidate}"
   if fetch "$BASE/reffix-libmaxminddb-openwrt-${FAMILY}.${EXT}" "$LIB" &&
