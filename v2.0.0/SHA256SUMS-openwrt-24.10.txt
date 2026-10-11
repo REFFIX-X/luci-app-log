@@ -1,2 +1,0 @@
-4c920279fbe48dbef7affc5a0037cb0c8cdf419c6f2383f36f1942af88e901a7  reffix-luci-app-log-viewer-openwrt-24.10.ipk
-921451f70f9679f9e054b242a24c683a1d78cf73ad75861b0103fb0c70291dde  reffix-libmaxminddb-openwrt-24.10.ipk
