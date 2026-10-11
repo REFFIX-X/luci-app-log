@@ -1,9 +1,11 @@
 #!/bin/sh
-# REFFIX Log Viewer installer for Flint4-class aarch64_cortex-a53 targets.
+# REFFIX Log Viewer installer for OpenWrt 25.12 / APK only (Flint4 aarch64_cortex-a53).
 set -eu
 
 REPO=REFFIX-X/luci-app-log
 VERSION_FALLBACK=v2.0.0
+FAMILY=25.12
+EXT=apk
 TMP="/tmp/reffix-luci-install.$$"
 mkdir -p "$TMP"
 trap 'rm -rf "$TMP"' EXIT INT TERM
@@ -21,43 +23,32 @@ fetch() {
   fi
 }
 
-if command -v apk >/dev/null 2>&1; then
-  if [ -r /etc/apk/arch ]; then
-    ARCH="$(sed -n '1{s/[[:space:]]*$//;p;}' /etc/apk/arch)"
-  else
-    ARCH="$(apk --print-arch 2>/dev/null || true)"
-  fi
-  if [ -r /etc/openwrt_release ]; then . /etc/openwrt_release; fi
-  case "$ARCH" in
-    aarch64_cortex-a53*) FAMILY=25.12; EXT=apk ;;
-    aarch64)
-      case "${DISTRIB_RELEASE:-}:${DISTRIB_TARGET:-}" in
-        25.12*:mediatek/filogic*|SNAPSHOT:mediatek/filogic*) FAMILY=25.12; EXT=apk ;;
-        *)
-          echo "ERROR: generic aarch64 is only mapped for OpenWrt 25.12/SNAPSHOT mediatek/filogic. Detected release=${DISTRIB_RELEASE:-unknown}, target=${DISTRIB_TARGET:-unknown}." >&2
-          exit 1
-          ;;
-      esac
-      ;;
-    *)
-      echo "ERROR: unsupported APK architecture: ${ARCH:-unknown}. Supported target is aarch64_cortex-a53." >&2
-      exit 1
-      ;;
-  esac
-  PM=apk
-elif command -v opkg >/dev/null 2>&1; then
-  ARCH="$(opkg print-architecture 2>/dev/null | awk '$2 >= 10 {print $1}' | tail -n 1)"
-  case "$ARCH" in
-    *aarch64_cortex-a53*) FAMILY=24.10; EXT=ipk ;;
-    *) echo "ERROR: unsupported opkg architecture: ${ARCH:-unknown}. Supported target is aarch64_cortex-a53." >&2; exit 1 ;;
-  esac
-  PM=opkg
-else
-  echo "ERROR: neither apk nor opkg was found." >&2
+command -v apk >/dev/null 2>&1 || {
+  echo "ERROR: REFFIX Log Viewer v2 supports OpenWrt 25.12 APK only. IPK/opkg releases are no longer built." >&2
   exit 1
-fi
+}
+if [ -r /etc/openwrt_release ]; then . /etc/openwrt_release; fi
+case "${DISTRIB_RELEASE:-}:${DISTRIB_TARGET:-}" in
+  25.12*:*) ;;
+  SNAPSHOT:mediatek/filogic*) ;;
+  *)
+    echo "ERROR: this installer is for OpenWrt 25.12 on the supported APK target. Detected release=${DISTRIB_RELEASE:-unknown}, target=${DISTRIB_TARGET:-unknown}." >&2
+    exit 1
+    ;;
+esac
+ARCH="$(sed -n '1{s/[[:space:]]*$//;p;}' /etc/apk/arch 2>/dev/null || apk --print-arch 2>/dev/null || true)"
+case "$ARCH" in
+  aarch64_cortex-a53*) ;;
+  aarch64)
+    case "${DISTRIB_TARGET:-}" in
+      mediatek/filogic*) ;;
+      *) echo "ERROR: generic aarch64 is only supported here for mediatek/filogic." >&2; exit 1 ;;
+    esac
+    ;;
+  *) echo "ERROR: unsupported APK architecture: ${ARCH:-unknown}. Expected aarch64_cortex-a53." >&2; exit 1 ;;
+esac
 
-echo "REFFIX installer: package manager=$PM, target family=$FAMILY, architecture=$ARCH."
+echo "REFFIX installer: OpenWrt 25.12 APK, architecture $ARCH."
 VERSION_FILE="$TMP/latest"
 VERSION=""
 if fetch "https://raw.githubusercontent.com/${REPO}/package-assets/latest" "$VERSION_FILE"; then
@@ -80,27 +71,21 @@ if [ -z "$VERSION" ]; then
   BASE="https://github.com/${REPO}/releases/download/${VERSION}"
   echo "Using GitHub release asset fallback: $VERSION."
   fetch "$BASE/reffix-libmaxminddb-openwrt-${FAMILY}.${EXT}" "$TMP/lib.${EXT}" || {
-    echo "ERROR: couldn't download the matching GeoIP helper package from GitHub Releases." >&2
-    echo "Check connectivity to github.com and confirm release $VERSION contains this platform's assets." >&2
+    echo "ERROR: couldn't download the matching GeoIP helper APK from GitHub Releases." >&2
+    echo "Check connectivity to github.com and confirm release $VERSION contains the 25.12 assets." >&2
     exit 1
   }
   fetch "$BASE/reffix-luci-app-log-viewer-openwrt-${FAMILY}.${EXT}" "$TMP/app.${EXT}" || {
-    echo "ERROR: couldn't download the REFFIX Log Viewer package from GitHub Releases." >&2
-    echo "Check connectivity to github.com and confirm release $VERSION contains this platform's assets." >&2
+    echo "ERROR: couldn't download the REFFIX Log Viewer APK from GitHub Releases." >&2
+    echo "Check connectivity to github.com and confirm release $VERSION contains the 25.12 assets." >&2
     exit 1
   }
 fi
 
 echo "Installing matching GeoIP helper library..."
-if [ "$PM" = apk ]; then
-  apk add --allow-untrusted "$TMP/lib.${EXT}"
-  echo "Installing/upgrading REFFIX Log Viewer..."
-  apk add --allow-untrusted "$TMP/app.${EXT}"
-else
-  opkg install "$TMP/lib.${EXT}"
-  echo "Installing/upgrading REFFIX Log Viewer..."
-  opkg install "$TMP/app.${EXT}"
-fi
+apk add --allow-untrusted "$TMP/lib.${EXT}"
+echo "Installing/upgrading REFFIX Log Viewer..."
+apk add --allow-untrusted "$TMP/app.${EXT}"
 
 if [ -x /usr/bin/flint4-geoip-update ]; then
   echo "Downloading local GeoLite2 country and ASN databases..."
