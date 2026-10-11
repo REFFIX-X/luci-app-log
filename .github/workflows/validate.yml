@@ -18,6 +18,7 @@ jobs:
       - name: Shell syntax
         run: |
           sh -n install.sh
+          sh -n install-online.sh
           sh -n uninstall.sh
           sh -n root/usr/bin/flint4-geoip
           sh -n root/usr/bin/flint4-geoip-update
