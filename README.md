@@ -1,66 +1,115 @@
-# luci-app-log-viewer
-Advanced syslog and kernel log (tail, search, etc) for LuCI (OpenWrt webUI).
+# REFFIX luci-app-log
 
-OpenWrt >= 22.03.
+A REFFIX-maintained fork of [gSpotx2f/luci-app-log](https://github.com/gSpotx2f/luci-app-log). The original System Log and Kernel Log views are retained, with a new **Firewall Log** view for OpenWrt and GL.iNet routers.
 
-Supported LuCI themes: luci-theme-bootstrap, luci-theme-material, luci-theme-openwrt-2020.
+## Features
 
-**Dependences:** ucode, ucode-mod-fs.
+- Original System Log and Kernel Log pages.
+- **Firewall Log** parses the `INFRA_PORT_HIT`, `JELLYFIN_BLOCK`, and conventional `DROP` / `REJECT` kernel log messages.
+- Readable table with timestamp, source IP, local GeoIP country flag/name and ASN organisation, destination IP, destination port/service, protocol, event type, source port, ingress interface and TCP flags.
+- Filters for event type and TCP/UDP, search across IPs/countries/ASNs/ports/services, CSV export and periodic refresh.
+- GeoIP enrichment uses a local MaxMind GeoLite2 database. No per-IP lookup API is called.
+- Does not add or modify firewall rules.
 
-## Installation notes
+## Installation
 
-**OpenWrt >= 25.12:**
+The current fork includes source files for the new Firewall Log view and helper scripts. A ready-to-install APK/IPK release has not yet been published, so use the source overlay steps below for now.
 
-    wget --no-check-certificate -O /tmp/luci-app-log-viewer-1.5.0-r5.apk https://github.com/gSpotx2f/packages-openwrt/raw/master/25.12/luci-app-log-viewer-1.5.0-r5.apk
-    apk --allow-untrusted add /tmp/luci-app-log-viewer-1.5.0-r5.apk
-    rm /tmp/luci-app-log-viewer-1.5.0-r5.apk
-    service rpcd restart
+### Install on OpenWrt / GL.iNet Flint4
 
-i18n-ru:
+Run the following commands on the router as root. Make a backup first, especially if you have customized the existing LuCI menu or ACL files.
 
-    wget --no-check-certificate -O /tmp/luci-i18n-log-viewer-ru-1.5.0-r5.apk https://github.com/gSpotx2f/packages-openwrt/raw/master/25.12/luci-i18n-log-viewer-ru-1.5.0-r5.apk
-    apk --allow-untrusted add /tmp/luci-i18n-log-viewer-ru-1.5.0-r5.apk
-    rm /tmp/luci-i18n-log-viewer-ru-1.5.0-r5.apk
+1. **Copy the repository to the router.** From Windows PowerShell, with the repo cloned locally:
 
-**OpenWrt <= 24.10:**
+   ```powershell
+   scp -r .\luci-app-log root@192.168.1.1:/tmp/
+   ssh root@192.168.1.1
+   cd /tmp/luci-app-log
+   ```
 
-    wget --no-check-certificate -O /tmp/luci-app-log-viewer_1.5.0-r5_all.ipk https://github.com/gSpotx2f/packages-openwrt/raw/master/24.10/luci-app-log-viewer_1.5.0-r5_all.ipk
-    opkg install /tmp/luci-app-log-viewer_1.5.0-r5_all.ipk
-    rm /tmp/luci-app-log-viewer_1.5.0-r5_all.ipk
-    service rpcd restart
+   Replace the IP with the router's LAN address and adjust the local folder if needed.
 
-i18n-ru:
+2. **Install the GeoIP database reader.**
 
-    wget --no-check-certificate -O /tmp/luci-i18n-log-viewer-ru_1.5.0-r5_all.ipk https://github.com/gSpotx2f/packages-openwrt/raw/master/24.10/luci-i18n-log-viewer-ru_1.5.0-r5_all.ipk
-    opkg install /tmp/luci-i18n-log-viewer-ru_1.5.0-r5_all.ipk
-    rm /tmp/luci-i18n-log-viewer-ru_1.5.0-r5_all.ipk
+   OpenWrt 25.12 and newer versions using APK:
+   ```sh
+   apk update
+   apk add libmaxminddb
+   ```
 
-## Screenshots:
+   OpenWrt 24.10 and older versions using opkg:
+   ```sh
+   opkg update
+   opkg install libmaxminddb
+   ```
 
-Kernel log:
+3. **Install the view and menu files.**
 
-![](https://github.com/gSpotx2f/luci-app-log/blob/master/screenshots/01.jpg)
+   From the repo directory on the router:
+   ```sh
+   sh ./install.sh
+   ```
 
-System log (logd):
+4. **Download the GeoLite2 Country and ASN databases, then test the helper.**
+   ```sh
+   /usr/bin/flint4-geoip-update
+   /usr/bin/flint4-geoip --json 1.1.1.1
+   ```
 
-![](https://github.com/gSpotx2f/luci-app-log/blob/master/screenshots/02.jpg)
+5. **Reload LuCI permissions and refresh the browser.**
+   ```sh
+   /etc/init.d/rpcd restart
+   ```
 
-Filter settings:
+   Then press **Ctrl+F5** in the browser and open **Status → Log Viewer → Firewall Log**.
 
-![](https://github.com/gSpotx2f/luci-app-log/blob/master/screenshots/03.jpg)
+The installer keeps timestamped backups of the menu and ACL JSON files under `/root/reffix-log-viewer-backup-*`. Review those backups if you need to restore your previous configuration.
 
-System log (syslog-ng):
+### Remove the overlay
 
-![](https://github.com/gSpotx2f/luci-app-log/blob/master/screenshots/04.jpg)
+From the repository directory on the router:
 
-## Mod lines:
+```sh
+sh ./uninstall.sh
+/etc/init.d/rpcd restart
+```
 
-    wget --no-check-certificate -O /www/luci-static/resources/view/log-viewer/log-widget.js https://github.com/gSpotx2f/luci-app-log/raw/master/dev-mods-examples/mod-lines/htdocs/luci-static/resources/view/log-viewer/log-widget.js
+The uninstall script removes the new view and GeoIP helpers. Restore the backed-up menu and ACL files manually if you want to revert those too. It does not remove the GeoLite2 database files or the `libmaxminddb` package.
 
-![](https://github.com/gSpotx2f/luci-app-log/blob/master/dev-mods-examples/mod-lines/screenshots/01.jpg)
+## Building a package for hosting
 
-## Mod textarea:
+For a proper release download, build the fork inside an OpenWrt SDK/buildroot matching the router's OpenWrt release and target:
 
-    wget --no-check-certificate -O /www/luci-static/resources/view/log-viewer/log-widget.js https://github.com/gSpotx2f/luci-app-log/raw/master/dev-mods-examples/mod-textarea/htdocs/luci-static/resources/view/log-viewer/log-widget.js
+```sh
+# Copy this repository to package/luci-app-log-viewer in the matching build tree
+make menuconfig
+# Select LuCI -> Applications -> luci-app-log-viewer
+make package/luci-app-log-viewer/compile V=s
+```
 
-![](https://github.com/gSpotx2f/luci-app-log/blob/master/dev-mods-examples/mod-textarea/screenshots/01.jpg)
+The output is under `bin/packages/...` for APK-based OpenWrt releases or `bin/packages/...` / `bin/targets/...` depending on the build setup. Publish only packages built for the matching release and architecture. Do not install an APK/IPK from another OpenWrt branch.
+
+GitHub Releases can host the resulting package and source archive. A package feed is another option, but it needs per-release package builds and repository metadata. Once the packages are built and tested, the README can link to stable release assets.
+
+## GeoIP data and privacy
+
+GeoLite2 Country and ASN database files are not bundled in the repository. The helper downloads them from the third-party [P3TERX/GeoLite.mmdb mirror](https://github.com/P3TERX/GeoLite.mmdb), not directly from MaxMind. Review the current [GeoLite2 EULA](https://www.maxmind.com/en/geolite2/eula) and [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) requirements before distributing or using the database files. Database updates can be run manually with:
+
+```sh
+/usr/bin/flint4-geoip-update
+```
+
+Monthly updates are a reasonable starting point. GeoIP is approximate; VPNs, proxies, mobile carrier networks, cloud egress and anycast can affect country and ASN attribution.
+
+## Firewall event meaning
+
+- `INFRA_PORT_HIT`: traffic matched the infrastructure watchlist. The existing logging-only rule returns to normal firewall processing and does not itself block traffic.
+- `JELLYFIN_BLOCK`: a custom Jellyfin log prefix. Verify the paired DROP rule if you need to confirm packet handling.
+- Generic `DROP` / `REJECT`: shown when the log line has source IP and destination port fields.
+- A TCP SYN is a connection attempt, not evidence that a service accepted the connection or that a compromise occurred.
+
+## Compatibility and upstream
+
+- Designed for LuCI / OpenWrt >= 22.03, but the overlay has not yet been verified on every OpenWrt release or theme.
+- Upstream project: https://github.com/gSpotx2f/luci-app-log
+- The original project is MIT-licensed; preserve its license and attribution. GeoLite2 data terms are separate from the app's license.
