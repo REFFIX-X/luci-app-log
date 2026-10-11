@@ -1,11 +1,11 @@
 # REFFIX luci-app-log
 
-A REFFIX-maintained fork of [gSpotx2f/luci-app-log](https://github.com/gSpotx2f/luci-app-log). The original System Log and Kernel Log views are retained, with a new **Firewall Log** view for OpenWrt and GL.iNet routers.
+A REFFIX-maintained fork of [gSpotx2f/luci-app-log](https://github.com/gSpotx2f/luci-app-log) for OpenWrt LuCI. Retains the upstream System Log and Kernel Log views and adds a general-purpose **Firewall Log** with local GeoIP enrichment.
 
 ## Features
 
 - Original System Log and Kernel Log pages.
-- **Firewall Log** parses the `INFRA_PORT_HIT`, `JELLYFIN_BLOCK`, and conventional `DROP` / `REJECT` kernel log messages.
+- **Firewall Log** parses the generic `INFRA_PORT_HIT` and conventional `DROP` / `REJECT` kernel log messages.
 - Readable table with timestamp, source IP, local GeoIP country flag/name and ASN organisation, destination IP, destination port/service, protocol, event type, source port, ingress interface and TCP flags.
 - Filters for event type and TCP/UDP, search across IPs/countries/ASNs/ports/services, CSV export and periodic refresh.
 - GeoIP enrichment uses a local MaxMind GeoLite2 database. No per-IP lookup API is called.
@@ -13,7 +13,7 @@ A REFFIX-maintained fork of [gSpotx2f/luci-app-log](https://github.com/gSpotx2f/
 
 ## Installation
 
-The current fork is hosted on GitHub, so you can download its source archive directly to the router. A ready-to-install APK/IPK release has not yet been published. The overlay method below assumes the upstream `luci-app-log-viewer` package is already installed; it adds the Firewall Log page and does not replace the original System Log / Kernel Log implementation.
+The `v1.5.0-r7` pre-release is a **source overlay**, not a prebuilt APK/IPK package. The overlay method assumes the upstream `luci-app-log-viewer` package is already installed; it adds the Firewall Log page and helper scripts without replacing the original System Log / Kernel Log implementation. [View releases](https://github.com/REFFIX-X/luci-app-log/releases).
 
 ### Install on OpenWrt / GL.iNet Flint4
 
@@ -87,9 +87,9 @@ sh ./uninstall.sh
 
 The uninstall script removes the new view and GeoIP helpers. Restore the backed-up menu and ACL files manually if you want to revert those too. It does not remove the GeoLite2 database files or the `libmaxminddb` package.
 
-## Building a package for hosting
+## Build an installable package
 
-For a proper release download, build the fork inside an OpenWrt SDK/buildroot matching the router's OpenWrt release and target:
+A package must be built inside an OpenWrt SDK/buildroot matching the router's OpenWrt release and target before it can be offered as an installable APK/IPK:
 
 ```sh
 # Copy this repository to package/luci-app-log-viewer in the matching build tree
@@ -100,7 +100,7 @@ make package/luci-app-log-viewer/compile V=s
 
 The output is under `bin/packages/...` for APK-based OpenWrt releases or `bin/packages/...` / `bin/targets/...` depending on the build setup. Publish only packages built for the matching release and architecture. Do not install an APK/IPK from another OpenWrt branch.
 
-GitHub Releases can host the resulting package and source archive. A package feed is another option, but it needs per-release package builds and repository metadata. Once the packages are built and tested, the README can link to stable release assets.
+GitHub Releases currently hosts the source pre-release. Prebuilt APK/IPK assets will be added only after matching SDK builds and router-side testing. A package feed is another option, but it needs builds and repository metadata for each supported release/architecture.
 
 ## GeoIP data and privacy
 
@@ -115,12 +115,11 @@ Monthly updates are a reasonable starting point. GeoIP is approximate; VPNs, pro
 ## Firewall event meaning
 
 - `INFRA_PORT_HIT`: traffic matched the infrastructure watchlist. The existing logging-only rule returns to normal firewall processing and does not itself block traffic.
-- `JELLYFIN_BLOCK`: a custom Jellyfin log prefix. Verify the paired DROP rule if you need to confirm packet handling.
 - Generic `DROP` / `REJECT`: shown when the log line has source IP and destination port fields.
 - A TCP SYN is a connection attempt, not evidence that a service accepted the connection or that a compromise occurred.
 
 ## Compatibility and upstream
 
-- Designed for LuCI / OpenWrt >= 22.03, but the overlay has not yet been verified on every OpenWrt release or theme.
+- Designed for LuCI / OpenWrt >= 22.03. The Firewall Log overlay has only source-level CI validation so far and has not yet been verified on every OpenWrt release or theme.
 - Upstream project: https://github.com/gSpotx2f/luci-app-log
 - The original project is MIT-licensed; preserve its license and attribution. GeoLite2 data terms are separate from the app's license.
