@@ -9,4 +9,4 @@
 - Publish SHA-256 checksums and document installation and upgrade behaviour.
 - Use OpenWrt's upstream `libmaxminddb` build recipe and correct executable permissions for helper scripts.
 
-The package name remains `luci-app-log-viewer`, so an existing installation is upgraded/replaced in place. The build validates both package variants before publishing. Router-side testing is still recommended.
+The package name remains `luci-app-log-viewer`, so an existing installation is upgraded/replaced in place. The release workflow builds both package variants and publishes them only after both succeed. Router-side testing is still recommended.
