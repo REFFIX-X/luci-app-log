@@ -31,8 +31,10 @@ if [ ! -s "$TMP/GeoLite2-Country.mmdb" ] || [ ! -s "$TMP/GeoLite2-ASN.mmdb" ]; t
   exit 1
 fi
 
-mmdblookup --file "$TMP/GeoLite2-Country.mmdb" --ip 1.1.1.1 country iso_code >/dev/null
-mmdblookup --file "$TMP/GeoLite2-ASN.mmdb" --ip 1.1.1.1 autonomous_system_organization >/dev/null
+# 1.1.1.1 is anycast and may lack country.iso_code in some GeoLite records.
+# Use a well-known ordinary unicast IP to validate both database lookup paths.
+mmdblookup --file "$TMP/GeoLite2-Country.mmdb" --ip 8.8.8.8 country iso_code >/dev/null
+mmdblookup --file "$TMP/GeoLite2-ASN.mmdb" --ip 8.8.8.8 autonomous_system_organization >/dev/null
 
 cp "$TMP/GeoLite2-Country.mmdb" "$BASE/GeoLite2-Country.mmdb.new"
 cp "$TMP/GeoLite2-ASN.mmdb" "$BASE/GeoLite2-ASN.mmdb.new"
