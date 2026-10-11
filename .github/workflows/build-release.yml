@@ -102,7 +102,21 @@ jobs:
           fi
           mkdir -p "package-mirror/${TAG}"
           cp dist/* "package-mirror/${TAG}/"
-          echo "$TAG" > package-mirror/latest
+          CURRENT_LATEST=""
+          if [ -f package-mirror/latest ]; then CURRENT_LATEST="$(cat package-mirror/latest)"; fi
+          TAG_NUM="${TAG##*-r}"
+          LATEST_NUM=0
+          case "$CURRENT_LATEST" in
+            v1.5.0-r[0-9]*) LATEST_NUM="${CURRENT_LATEST##*-r}" ;;
+          esac
+          case "$TAG_NUM" in
+            ""|*[!0-9]*) echo "Invalid release tag number: $TAG" >&2; exit 1 ;;
+          esac
+          if [ "$TAG_NUM" -ge "$LATEST_NUM" ]; then
+            echo "$TAG" > package-mirror/latest
+          else
+            echo "Keeping newer package marker $CURRENT_LATEST; not downgrading it to $TAG."
+          fi
           git -C package-mirror config user.name "github-actions[bot]"
           git -C package-mirror config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git -C package-mirror add -- "$TAG" latest
