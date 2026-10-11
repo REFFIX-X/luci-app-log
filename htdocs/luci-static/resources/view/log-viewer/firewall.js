@@ -83,16 +83,18 @@ function parseLine(line, index) {
   };
 }
 
+const BUNDLED_FLAGS = new Set('ae au be br ca ch cn cz de es fi fr gb hk id il in ir it jp kr mx my nl no ph pl pt ro ru sa se sg th tr tw ua us vn za'.split(' '));
+
 function countryFlag(code) {
   if (!/^[A-Z]{2}$/.test(code || ''))
     return '<span class="fw-flag-fallback" title="Country unavailable">🌐</span>';
+  if (!BUNDLED_FLAGS.has(code))
+    return '<span class="fw-flag-fallback" title="Flag not bundled for ' + esc(code) + '">🌐</span>';
 
-  // Windows and some Linux fonts render Unicode regional-indicator pairs as
-  // letters instead of visible national flags. Use small flag images so the
-  // appearance is consistent across browsers and operating systems.
-  return '<img class="fw-flag-img" src="https://flagcdn.com/w20/' +
-    code.toLowerCase() + '.png" alt="' + esc(code) +
-    '" width="20" loading="lazy" decoding="async" referrerpolicy="no-referrer">';
+  // Flags are bundled locally. This avoids LuCI CSP restrictions on external image hosts.
+  return '<img class="fw-flag-img" src="/luci-static/resources/log-viewer/flags/' +
+    code.toLowerCase() + '.svg" alt="' + esc(code) +
+    '" width="20" loading="lazy" decoding="async">';
 }
 
 return view.extend({
