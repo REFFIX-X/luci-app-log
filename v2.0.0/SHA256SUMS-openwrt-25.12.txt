@@ -1,0 +1,2 @@
+caf8e732eb9e8f552e0551fb398f59c53525c1dbc036a28e986bf6b024d4d964  reffix-luci-app-log-viewer-openwrt-25.12.apk
+97450c0856c90c0bbe833a9789f58187fc51549446e7de756634d49481988279  reffix-libmaxminddb-openwrt-25.12.apk
