@@ -18,7 +18,7 @@ define Package/luci-app-log-viewer
   SECTION:=luci
   CATEGORY:=LuCI
   SUBMENU:=3. Applications
-  TITLE:=REFFIX System, Kernel and Firewall Log Viewer
+  TITLE:=REFFIX Firewall Log
   URL:=https://github.com/REFFIX-X/luci-app-log
   DEPENDS:=+ucode +ucode-mod-fs +libmaxminddb +iptables-nft +jsonfilter
   PKGARCH:=all
@@ -29,8 +29,8 @@ define Package/luci-app-log-viewer/conffiles
 endef
 
 define Package/luci-app-log-viewer/description
- REFFIX Log Viewer v2: System Log, Kernel Log, Firewall Log and
- optional local GeoLite2 Country/ASN enrichment.
+ REFFIX firewall event dashboard with optional local GeoLite2 Country/ASN
+ enrichment and configurable log-only WAN port monitoring.
 endef
 
 define Build/Compile

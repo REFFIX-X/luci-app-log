@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Makes Firewall Log the app's only page and removes the System Log and Kernel Log submenu entries.
 - Classifies configured `INFRA_PORT_HIT` WAN watchlist entries as Blocked and clarifies default-deny behavior.
 - Adds clickable source, burst and destination-port insights, expandable repeated-probe groups, and a collapsible Insights panel.
 - Adds a router-configurable WAN interface and browser-local exposed-service labels to distinguish hits matching configured forwards.

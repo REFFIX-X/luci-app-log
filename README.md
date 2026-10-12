@@ -1,6 +1,6 @@
-# REFFIX Log Viewer
+# REFFIX Firewall Log
 
-REFFIX-maintained LuCI log viewer for OpenWrt, including System Log, Kernel Log, and a firewall-event dashboard with local GeoIP enrichment.
+REFFIX-maintained Firewall Log dashboard for OpenWrt with local GeoIP enrichment.
 
 ## Highlights
 
