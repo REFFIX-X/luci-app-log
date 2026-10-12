@@ -1,5 +1,9 @@
 # Changelog
 
+## v3.1.1
+
+- Fixes WAN watcher startup on OpenWrt 25.12 when `IPKG_INSTROOT` is unset during package post-upgrade.
+
 ## v3.1.0
 
 - Classifies configured `INFRA_PORT_HIT` WAN watchlist entries as Blocked and clarifies default-deny behavior.

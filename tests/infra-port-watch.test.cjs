@@ -29,6 +29,10 @@ test('watcher only logs TCP SYN and UDP matches, then returns traffic to normal 
   assert.match(watcher, /if \[ "\$count" -ge 15 \]/, 'multiport groups stay within the xt_multiport limit');
 });
 
+test('watcher initializes OpenWrt package install context before sourcing system functions', () => {
+  assert.match(watcher, /IPKG_INSTROOT="\$\{IPKG_INSTROOT:-\}"[\s\S]*?\. \/lib\/functions\.sh/);
+});
+
 test('UI writer validates configurable WAN device and port list before committing UCI', () => {
   assert.match(writer, /invalid WAN interface/);
   assert.match(writer, /port out of range/);

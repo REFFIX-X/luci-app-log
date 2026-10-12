@@ -37,6 +37,7 @@ Manual APK packages and SHA-256 checksums are published on [GitHub Releases](htt
 - Use **WAN / exposed ports** to enter the actual interface names shown in `IN=` log fields and ports forwarded to services. Labels apply only in this browser. A hit matching an exposed label is marked **Exposed**; the watchlist line does not prove that the forward accepted the connection. No LAN hostname lookup is performed.
 - The `INFRA_PORT_HIT` port set is determined by the firewall logging rule on the router. This app displays the destination ports present in those log entries; the port insight ranks the ports in the currently selected time window.
 - The package installs an IPv4-only log-only raw-table watch rule for common TCP SYN and UDP destination ports on the logical WAN device. It never accepts or drops traffic, and its shared rate limit is 10 log entries per minute after an initial burst of 20. Edit the WAN device and up to 256 ports in **WAN / exposed ports**. The defaults are in `/etc/config/infra-port-watch`; the UI applies changes immediately and preserves them across upgrades.
+- v3.1.1 fixes WAN watcher startup during package post-upgrade on OpenWrt 25.12. If upgrading from v3.1.0 left the watcher inactive, update the package and run `/etc/init.d/infra-port-watch restart` once.
 - The app does not change firewall accept/drop policy. The watchlist is not exhaustive: add uncommon ports such as 25125 in the UI if you want to log them.
 
 ## GeoIP and privacy

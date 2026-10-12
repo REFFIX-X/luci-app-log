@@ -2,6 +2,11 @@
 # Log-only WAN port watcher. It never accepts or drops traffic.
 set -eu
 
+# OpenWrt's /lib/functions.sh references IPKG_INSTROOT in config helpers,
+# including during normal runtime when package managers leave it unset.
+# Initialize it before sourcing that library so nounset cannot abort startup.
+IPKG_INSTROOT="${IPKG_INSTROOT:-}"
+
 CONFIG=infra-port-watch.main
 MATCH_CHAIN=REFFIX_INFRA_WATCH
 LOG_CHAIN=INFRA_PORT_LOG
