@@ -1,0 +1,40 @@
+#!/bin/sh
+# Validated LuCI configuration writer for the WAN port-watch service.
+set -eu
+
+[ "${1:-}" = set ] && [ "$#" -eq 4 ] || {
+	echo 'usage: infra-port-watch-config set <0|1> <auto|interface> <ports>' >&2
+	exit 2
+}
+enabled="$2"
+wan="$3"
+ports_input="$(printf '%s' "$4" | tr ',\n\t' '   ')"
+case "$enabled" in 0|1) ;; *) echo 'enabled must be 0 or 1' >&2; exit 2 ;; esac
+case "$wan" in
+	auto) ;;
+	''|*[!a-zA-Z0-9_.:-]*) echo 'invalid WAN interface' >&2; exit 2 ;;
+esac
+
+normalized=""
+count=0
+for port in $ports_input; do
+	case "$port" in ''|*[!0-9]*|??????*) echo "invalid port: $port" >&2; exit 2 ;; esac
+	[ "$port" -ge 1 ] 2>/dev/null && [ "$port" -le 65535 ] 2>/dev/null || {
+		echo "port out of range: $port" >&2
+		exit 2
+	}
+	case " $normalized " in *" $port "*) continue ;; esac
+	normalized="${normalized:+$normalized }$port"
+	count=$((count + 1))
+	[ "$count" -le 256 ] || { echo 'maximum 256 ports' >&2; exit 2; }
+done
+[ -n "$normalized" ] || { echo 'at least one port is required' >&2; exit 2; }
+
+uci -q get infra-port-watch.main >/dev/null 2>&1 || uci set infra-port-watch.main=watch
+uci set "infra-port-watch.main.enabled=$enabled"
+uci set "infra-port-watch.main.wan_interface=$wan"
+uci -q delete infra-port-watch.main.ports 2>/dev/null || true
+for port in $normalized; do uci add_list "infra-port-watch.main.ports=$port"; done
+uci commit infra-port-watch
+/etc/init.d/infra-port-watch restart
+/usr/sbin/infra-port-watch get

@@ -24,9 +24,9 @@ test('classifies explicit blocked events and retains original packet data', () =
   assert.equal(event.rawLine.includes('FIREWALL_BLOCK'), true);
 });
 
-test('keeps infrastructure watch events as observed when verdict is unknown', () => {
+test('classifies infrastructure WAN watchlist hits as blocked', () => {
   const event = parser('Oct 12 12:00:01 2026 router kernel: INFRA_PORT_HIT: IN=wan SRC=203.0.113.8 DST=192.0.2.1 PROTO=UDP DPT=443', 2);
-  assert.equal(event.kind, 'Observed');
+  assert.equal(event.kind, 'Blocked');
   assert.equal(event.prefix, 'INFRA_PORT_HIT');
 });
 

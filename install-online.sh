@@ -116,5 +116,5 @@ if [ -x /usr/bin/flint4-geoip-update ]; then
 fi
 
 /etc/init.d/rpcd restart
-echo "Done. Open Status -> Log Viewer -> Firewall Log in LuCI."
+echo "Done. Open Status -> Firewall Log in LuCI."
 echo "The existing luci-app-log-viewer package was upgraded in place; do not uninstall it first."

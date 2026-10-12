@@ -27,7 +27,7 @@
     {
       "marker": "INFRA_PORT_HIT",
       "label": "Infrastructure watchlist",
-      "note": "Logging-only match. It does not by itself block the packet or establish the final verdict."
+      "note": "WAN watchlist hit. Default-deny blocks this port unless an allow rule or port forward applies."
     }
   ]
 }

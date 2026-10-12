@@ -1,0 +1,142 @@
+#!/bin/sh
+# Log-only WAN port watcher. It never accepts or drops traffic.
+set -eu
+
+CONFIG=infra-port-watch.main
+MATCH_CHAIN=REFFIX_INFRA_WATCH
+LOG_CHAIN=INFRA_PORT_LOG
+
+uci_get() { uci -q get "$1" 2>/dev/null || true; }
+
+resolve_wan() {
+	configured="$(uci_get "$CONFIG.wan_interface")"
+	[ -n "$configured" ] || configured=auto
+	if [ "$configured" = auto ]; then
+		command -v ubus >/dev/null 2>&1 || return 1
+		command -v jsonfilter >/dev/null 2>&1 || return 1
+		status="$(ubus call network.interface.wan status 2>/dev/null)"
+		configured="$(printf '%s' "$status" | jsonfilter -e '@.device' 2>/dev/null | head -n 1)"
+		[ -n "$configured" ] || configured="$(printf '%s' "$status" | jsonfilter -e '@.l3_device' 2>/dev/null | head -n 1)"
+	fi
+	case "$configured" in
+		''|*[!a-zA-Z0-9_.:-]*) return 1 ;;
+	esac
+	printf '%s\n' "$configured"
+}
+
+remove_legacy_rules() {
+	# Remove the previous script's direct PREROUTING jumps during migration.
+	legacy_groups='
+21,22,23,25,53,69,80,81,110,111
+123,135,137,138,139,143,161,162,179,389
+427,443,445,465,500,502,514,515,520,548
+554,587,631,636,873,902,989,990,993,995
+1080,1194,1433,1434,1521,1701,1723,1883,1900,2049
+2082,2083,2181,2222,2375,2376,2483,2484,3000,3128
+3268,3306,3389,3690,4444,4500,5000,5001,5060,5061
+5432,5555,5601,5672,5900,5985,5986,6379,6443,6667
+7001,7070,7443,7777,8000,8008,8080,8081,8088,8443
+8888,9000,9042,9090,9200,9300,9418,10000,11211,27017
+'
+	for iface in "$WAN_IF" eth2; do
+		for ports in $legacy_groups; do
+			while iptables -t raw -D PREROUTING -i "$iface" -p tcp -m multiport --dports "$ports" -m tcp --syn -j "$LOG_CHAIN" 2>/dev/null; do :; done
+			while iptables -t raw -D PREROUTING -i "$iface" -p udp -m multiport --dports "$ports" -j "$LOG_CHAIN" 2>/dev/null; do :; done
+		done
+	done
+}
+
+remove_rules() {
+	command -v iptables >/dev/null 2>&1 || return 0
+	while iptables -t raw -D PREROUTING -j "$MATCH_CHAIN" 2>/dev/null; do :; done
+	iptables -t raw -F "$MATCH_CHAIN" 2>/dev/null || true
+	iptables -t raw -X "$MATCH_CHAIN" 2>/dev/null || true
+	iptables -t raw -F "$LOG_CHAIN" 2>/dev/null || true
+	iptables -t raw -X "$LOG_CHAIN" 2>/dev/null || true
+}
+
+load_ports() {
+	ports="$(uci_get "$CONFIG.ports")"
+	[ -n "$ports" ] || ports="21 22 23 25 53 69 80 81 110 111 123 135 137 138 139 143 161 162 179 389 427 443 445 465 500 502 514 515 520 548 554 587 631 636 873 902 989 990 993 995 1080 1194 1433 1434 1521 1701 1723 1883 1900 2049 2082 2083 2181 2222 2375 2376 2483 2484 3000 3128 3268 3306 3389 3690 4444 4500 5000 5001 5060 5061 5432 5555 5601 5672 5900 5985 5986 6379 6443 6667 7001 7070 7443 7777 8000 8008 8080 8081 8088 8443 8888 9000 9042 9090 9200 9300 9418 10000 11211 27017"
+	ports="$(printf '%s' "$ports" | tr ',\n\t' '   ')"
+	NORMALIZED_PORTS=""
+	for port in $ports; do
+		case "$port" in ''|*[!0-9]*|??????*) continue ;; esac
+		[ "$port" -ge 1 ] 2>/dev/null && [ "$port" -le 65535 ] 2>/dev/null || continue
+		case " $NORMALIZED_PORTS " in *" $port "*) continue ;; esac
+		NORMALIZED_PORTS="${NORMALIZED_PORTS:+$NORMALIZED_PORTS }$port"
+	done
+}
+
+install_groups() {
+	protocol="$1"
+	group=""
+	count=0
+	for port in $NORMALIZED_PORTS; do
+		if [ "$count" -ge 15 ]; then
+			add_group_rule "$protocol" "$group"
+			group=""
+			count=0
+		fi
+		group="${group:+$group,}$port"
+		count=$((count + 1))
+	done
+	[ -z "$group" ] || add_group_rule "$protocol" "$group"
+}
+
+add_group_rule() {
+	protocol="$1"
+	ports="$2"
+	if [ "$protocol" = tcp ]; then
+		iptables -t raw -A "$MATCH_CHAIN" -i "$WAN_IF" -p tcp -m multiport --dports "$ports" -m tcp --syn -j "$LOG_CHAIN"
+	else
+		iptables -t raw -A "$MATCH_CHAIN" -i "$WAN_IF" -p udp -m multiport --dports "$ports" -j "$LOG_CHAIN"
+	fi
+}
+
+apply_rules() {
+	command -v iptables >/dev/null 2>&1 || {
+		[ "$(uci_get "$CONFIG.enabled")" != 0 ] || return 0
+		echo 'iptables is unavailable; WAN port logging was not enabled.' >&2
+		return 1
+	}
+	resolved_wan="$(resolve_wan 2>/dev/null || true)"
+	WAN_IF="${resolved_wan:-eth2}"
+	load_ports
+	remove_legacy_rules
+	[ "$(uci_get "$CONFIG.enabled")" != 0 ] || { remove_rules; return 0; }
+	[ -n "$resolved_wan" ] || { echo 'Unable to resolve the configured WAN interface.' >&2; return 1; }
+	WAN_IF="$resolved_wan"
+	[ -n "$NORMALIZED_PORTS" ] || { echo 'The WAN watch port list is empty.' >&2; return 1; }
+	remove_rules
+	iptables -t raw -N "$MATCH_CHAIN" 2>/dev/null || true
+	iptables -t raw -F "$MATCH_CHAIN" || return 1
+	iptables -t raw -N "$LOG_CHAIN" 2>/dev/null || true
+	iptables -t raw -F "$LOG_CHAIN" || return 1
+	iptables -t raw -A "$LOG_CHAIN" -m limit --limit 10/minute --limit-burst 20 \
+		-j LOG --log-prefix 'INFRA_PORT_HIT: ' --log-level 4 || return 1
+	iptables -t raw -A "$LOG_CHAIN" -j RETURN || return 1
+	install_groups tcp
+	install_groups udp
+	iptables -t raw -A "$MATCH_CHAIN" -j RETURN || return 1
+	iptables -t raw -I PREROUTING 1 -j "$MATCH_CHAIN" || return 1
+	echo "INFRA_PORT_WATCH installed on $WAN_IF"
+}
+
+print_config() {
+	enabled="$(uci_get "$CONFIG.enabled")"; [ -n "$enabled" ] || enabled=1
+	wan="$(uci_get "$CONFIG.wan_interface")"; [ -n "$wan" ] || wan=auto
+	load_ports
+	active=""
+	if [ "$enabled" = 1 ]; then active="$(resolve_wan 2>/dev/null || true)"; fi
+	ports_json="$(printf '%s' "$NORMALIZED_PORTS" | awk '{ for (i=1;i<=NF;i++) printf "%s%s", (i==1?"":","), $i }')"
+	printf '{"enabled":%s,"wan_interface":"%s","active_interface":"%s","ports":"%s"}\n' \
+		"$([ "$enabled" = 1 ] && echo true || echo false)" "$wan" "$active" "$ports_json"
+}
+
+case "${1:-}" in
+	get) print_config ;;
+	apply) apply_rules ;;
+	remove) remove_rules ;;
+	*) echo 'usage: infra-port-watch {get|apply|remove}' >&2; exit 2 ;;
+esac
