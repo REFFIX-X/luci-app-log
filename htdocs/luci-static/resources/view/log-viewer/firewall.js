@@ -60,7 +60,7 @@ function parseFields(line) {
 }
 
 function parseLine(line, index) {
-  const observed = line.includes('INFRA_PORT_HIT:');
+  const infraHit = line.includes('INFRA_PORT_HIT:');
   const hasPacketTuple = /SRC=\S+.*DPT=\d+/.test(line);
   const blockMarker = /\b(?:DROP|REJECT)\b/i.test(line) ||
     /(?:^|[\s:])[A-Z0-9_-]*(?:BLOCKED|BLOCK|DROP|REJECT):/i.test(line);
@@ -71,9 +71,9 @@ function parseLine(line, index) {
 
   let prefix = '';
   let kind = '';
-  if (observed) {
+  if (infraHit) {
     prefix = 'INFRA_PORT_HIT';
-    kind = 'Observed';
+    kind = 'Blocked';
   }
   else if (hasPacketTuple && blockMarker) {
     prefix = 'FIREWALL_BLOCK';
@@ -136,9 +136,19 @@ return view.extend({
   kindFilter: 'all',
   protoFilter: 'all',
   timeFilter: 'all',
+  sourceFilter: '',
+  portFilter: null,
   paused: false,
   policyRules: [],
   policyRulesLoaded: false,
+  trafficContextLoaded: false,
+  watchConfig: null,
+  watchConfigLoaded: false,
+  wanInterfaces: [],
+  exposedPorts: {},
+  groupRepeated: true,
+  expandedProbeGroups: new Set(),
+  showAllPorts: false,
   maxEntries: 500,
   sourceLineCount: 0,
   lastCollectedAt: 0,
@@ -172,13 +182,81 @@ return view.extend({
     }
   },
 
+  loadWatchConfig: async function() {
+    if (this.watchConfigLoaded) return;
+    this.watchConfigLoaded = true;
+    try {
+      const raw = await fs.exec_direct('/usr/sbin/infra-port-watch', ['get'], 'text');
+      this.watchConfig = JSON.parse(raw || '{}');
+    }
+    catch (e) {
+      this.watchConfig = null;
+    }
+  },
+
+  loadTrafficContext: function() {
+    if (this.trafficContextLoaded) return;
+    this.trafficContextLoaded = true;
+
+    // Use explicitly configured allow labels as useful defaults; the user can
+    // edit these independently in this browser's traffic-context settings.
+    this.exposedPorts = {};
+    this.policyRules.forEach(rule => {
+      if (!rule || !/_ALLOW$|_EXPOSED?$|_FORWARD$/i.test(String(rule.marker || '')) ||
+          !Number.isInteger(Number(rule.port)) || Number(rule.port) < 1 || Number(rule.port) > 65535)
+        return;
+      this.exposedPorts[Number(rule.port)] = String(rule.label || ('Port ' + rule.port));
+    });
+
+    try {
+      const saved = JSON.parse(localStorage.getItem('reffix-log-viewer.traffic-context') || 'null');
+      if (saved && typeof saved === 'object') {
+        if (saved.exposedPorts && typeof saved.exposedPorts === 'object')
+          this.exposedPorts = Object.fromEntries(Object.entries(saved.exposedPorts)
+            .filter(([port, label]) => /^\d{1,5}$/.test(port) && Number(port) > 0 && Number(port) <= 65535 && typeof label === 'string')
+            .map(([port, label]) => [Number(port), label.trim() || ('Port ' + port)]));
+      }
+      this.groupRepeated = localStorage.getItem('reffix-log-viewer.group-repeated') !== 'false';
+    }
+    catch (e) {}
+    const activeInterface = this.watchConfig && (this.watchConfig.active_interface ||
+      (this.watchConfig.wan_interface !== 'auto' ? this.watchConfig.wan_interface : ''));
+    if (activeInterface) this.wanInterfaces = [String(activeInterface).trim().toLowerCase()];
+    if (this.groupCheckbox) this.groupCheckbox.checked = this.groupRepeated;
+  },
+
+  applyTrafficContext: function(event) {
+    if (event.prefix !== 'INFRA_PORT_HIT') return event;
+
+    event.kind = event.baseKind || 'Blocked';
+    event.policyLabel = event.basePolicyLabel || 'WAN watchlist';
+    event.policyNote = event.basePolicyNote || '';
+
+    const iface = String(event.iface || '').toLowerCase();
+    const onWan = !this.wanInterfaces.length || this.wanInterfaces.includes(iface);
+    if (!onWan) {
+      event.kind = 'Observed';
+      event.policyNote = 'Watchlist hit on an interface not configured as WAN. Set the WAN interface list to classify it.';
+    }
+    else if (this.exposedPorts[event.dport]) {
+      event.kind = 'Exposed';
+      event.policyLabel = this.exposedPorts[event.dport];
+      event.policyNote = 'Hit matches a configured exposed service. The watchlist line alone does not confirm whether the forward accepted it.';
+    }
+    else {
+      event.kind = 'Blocked';
+      event.policyNote = 'WAN watchlist hit. Default-deny blocks this port unless an allow rule or port forward applies.';
+    }
+    return event;
+  },
+
   loadPreferences: function() {
     try {
       this.showReputation = localStorage.getItem('reffix-log-viewer.external-reputation') === 'true';
       const presets = JSON.parse(localStorage.getItem('reffix-log-viewer.filters') || '[]');
       this.filterPresets = Array.isArray(presets) ? presets.filter(p =>
         p && typeof p.name === 'string' && typeof p.query === 'string' &&
-        ['all', 'blocked', 'observed', 'allowed'].includes(p.kind) &&
+        ['all', 'blocked', 'observed', 'allowed', 'exposed'].includes(p.kind) &&
         ['all', 'tcp', 'udp'].includes(p.proto) &&
         ['all', '5m', '15m', '1h', '6h', '24h'].includes(p.window)
       ).slice(0, 20) : [];
@@ -260,7 +338,72 @@ return view.extend({
       event.policyLabel = String(rule.label || marker);
       event.policyNote = String(rule.note || '');
     }
+    if (marker === 'INFRA_PORT_HIT' && /logging-only match|does not by itself block/i.test(event.policyNote || ''))
+      event.policyNote = 'WAN watchlist hit. Default-deny blocks this port unless an allow rule or port forward applies.';
+    event.baseKind = event.kind;
+    event.basePolicyLabel = event.policyLabel;
+    event.basePolicyNote = event.policyNote;
     return event;
+  },
+
+  parseTrafficContext: function(interfacesText, portsText) {
+    const interfaces = [...new Set(String(interfacesText || '').split(/[\s,]+/)
+      .map(v => v.trim().toLowerCase()).filter(v => /^[a-z0-9_.:-]{1,32}$/.test(v)))];
+    const ports = {};
+    String(portsText || '').split(/\r?\n/).forEach(line => {
+      const match = line.match(/^\s*(\d{1,5})\s*(?:=|:|\s)\s*(.*?)\s*$/);
+      if (!match) return;
+      const port = Number(match[1]);
+      if (port > 0 && port <= 65535) ports[port] = match[2].slice(0, 60) || ('Port ' + port);
+    });
+    return {interfaces, ports};
+  },
+
+  openTrafficSettings: async function() {
+    await this.loadWatchConfig();
+    const interfaces = E('input', {class: 'cbi-input-text', type: 'text', placeholder: _('auto or e.g. eth2')});
+    interfaces.value = this.watchConfig ? this.watchConfig.wan_interface : 'auto';
+    const watching = E('input', {type: 'checkbox'});
+    watching.checked = !this.watchConfig || this.watchConfig.enabled !== false;
+    const watchPorts = E('textarea', {class: 'cbi-input-text', rows: 7, placeholder: _('Comma or whitespace separated ports')});
+    watchPorts.value = this.watchConfig ? this.watchConfig.ports : '';
+    const ports = E('textarea', {class: 'cbi-input-text', rows: 6, placeholder: _('8096 = Jellyfin\n8920 = Jellyfin HTTPS')});
+    ports.value = Object.entries(this.exposedPorts).map(([port, label]) => port + ' = ' + label).join('\n');
+    ui.showModal(_('WAN interface and exposed services'), [
+      E('p', {class: 'cbi-section-descr'}, _('The watch rule logs matching TCP SYN and UDP probes only; it never accepts or drops traffic. Auto resolves the logical WAN device. Watch settings are saved on this router; service labels below are saved in this browser.')),
+      E('label', {class: 'fw-settings-field fw-watch-toggle'}, [watching, E('span', {}, _('Enable WAN port watch'))]),
+      E('label', {class: 'fw-settings-field'}, [E('span', {}, _('WAN interface (auto or device name shown in IN=)')), interfaces]),
+      E('label', {class: 'fw-settings-field'}, [E('span', {}, _('Ports to log (1–65535; comma or whitespace separated; up to 256)')), watchPorts]),
+      E('label', {class: 'fw-settings-field'}, [E('span', {}, _('Exposed destination ports (one port = label per line)')), ports]),
+      E('div', {class: 'right'}, [
+        E('button', {class: 'cbi-button', click: ui.hideModal}, _('Cancel')),
+        E('button', {class: 'cbi-button cbi-button-action important', click: async () => {
+          const wan = interfaces.value.trim() || 'auto';
+          try {
+            const raw = await fs.exec_direct('/usr/sbin/infra-port-watch-config', [
+              'set', watching.checked ? '1' : '0', wan, watchPorts.value
+            ], 'text');
+            this.watchConfig = JSON.parse(raw || '{}');
+            this.watchConfigLoaded = true;
+          }
+          catch (e) {
+            ui.addNotification(null, E('p', _('Could not apply WAN watch settings: ') + (e.message || e)), 'error');
+            return;
+          }
+          const config = this.parseTrafficContext(interfaces.value, ports.value);
+          const activeInterface = this.watchConfig.active_interface ||
+            (this.watchConfig.wan_interface !== 'auto' ? this.watchConfig.wan_interface : '');
+          this.wanInterfaces = activeInterface ? [String(activeInterface).toLowerCase()] : [];
+          this.exposedPorts = config.ports;
+          try { localStorage.setItem('reffix-log-viewer.traffic-context', JSON.stringify({exposedPorts: config.ports})); }
+          catch (e) { ui.addNotification(null, E('p', _('Could not save settings in this browser.')), 'warning'); }
+          this.events.forEach(event => this.applyTrafficContext(event));
+          ui.hideModal();
+          this.renderRows();
+          this.renderInsightsPanel();
+        }}, _('Save settings'))
+      ])
+    ]);
   },
 
   getTimeWindowMs: function() {
@@ -320,14 +463,17 @@ return view.extend({
     const topSources = renderList(top(sources, 'source', 5), item => {
       const geo = this.geoCache[item.source] || {};
       const label = geo.country_name || 'GeoIP pending';
+      const countryCode = (geo.country_code || '').toUpperCase();
       const asn = geo.asn_organization ? ' · ' + geo.asn_organization : '';
-      return '<li><code>' + esc(item.source) + '</code><span>' + item.count + ' events</span>' +
-        '<small>' + esc(label + asn) + ' · ' + item.ports.size + ' ports</small></li>';
+      return '<li><button type="button" class="fw-insight-filter" data-source-filter="' + esc(item.source) + '"><span class="fw-insight-ip"><span class="fw-flag" title="' + esc(label) + '">' + countryFlag(countryCode) + '</span><code>' + esc(item.source) + '</code></span><span>' + item.count + ' events</span>' +
+        '<small>' + esc(label + asn) + ' · ' + item.ports.size + ' ports</small></button></li>';
     }, 'No sources in this window.');
 
-    const topPorts = renderList(top(ports, 'port', 5), item =>
-      '<li><strong>' + esc(item.port) + ' · ' + esc(item.service) + '</strong><span>' + item.count + ' events</span>' +
-      '<small>TCP ' + item.tcp + ' · UDP ' + item.udp + '</small></li>',
+    const sortedPorts = [...ports.values()].sort((a, b) => b.count - a.count || a.port - b.port);
+    const visiblePorts = this.showAllPorts ? sortedPorts : sortedPorts.slice(0, 5);
+    const topPorts = renderList(visiblePorts, item =>
+      '<li><button type="button" class="fw-insight-port" data-port-filter="' + item.port + '"><strong>' + esc(item.port) + ' · ' + esc(item.service) + '</strong><span>' + item.count + ' events</span>' +
+      '<small>TCP ' + item.tcp + ' · UDP ' + item.udp + '</small></button></li>',
       'No destination ports in this window.');
 
     const topAsns = renderList(top(asns, 'name', 5), item =>
@@ -339,13 +485,12 @@ return view.extend({
     events.forEach(e => {
       if (!isPublic(e.source)) return;
       if (!scanMap.has(e.source))
-        scanMap.set(e.source, { source: e.source, count: 0, ports: new Set(), destinations: new Set(), blocked: 0, observed: 0 });
+        scanMap.set(e.source, { source: e.source, count: 0, ports: new Set(), destinations: new Set(), blocked: 0 });
       const s = scanMap.get(e.source);
       s.count++;
       if (e.dport) s.ports.add(e.dport);
       if (e.destination) s.destinations.add(e.destination);
       if (e.kind === 'Blocked') s.blocked++;
-      if (e.kind === 'Observed') s.observed++;
     });
     const signals = [...scanMap.values()].map(s => {
       const multiPort = s.ports.size >= 8;
@@ -362,21 +507,24 @@ return view.extend({
 
     const scanHtml = renderList(signals, item => {
       const geo = this.geoCache[item.source] || {};
+      const country = geo.country_name || 'GeoIP pending';
+      const countryCode = (geo.country_code || '').toUpperCase();
       const details = item.ports.size + ' ports · ' + item.destinations.size + ' targets · ' +
         item.count + ' events';
-      return '<li><code>' + esc(item.source) + '</code><span class="fw-signal">' + esc(item.signal) + '</span>' +
-        '<small>' + esc(details) + ' · ' + esc(geo.country_name || 'GeoIP pending') + '</small></li>';
+      return '<li><button type="button" class="fw-insight-filter fw-scan-filter" data-source-filter="' + esc(item.source) + '"><span class="fw-insight-ip"><span class="fw-flag" title="' + esc(country) + '">' + countryFlag(countryCode) + '</span><code>' + esc(item.source) + '</code></span><span class="fw-signal">' + esc(item.signal) + '</span>' +
+        '<small>' + esc(details) + ' · ' + esc(country) + '</small></button></li>';
     }, 'No scan/burst thresholds triggered in this window.');
 
     const policyNotes = this.policyRules.length
       ? 'Local policy labels active: ' + this.policyRules.length
       : 'Optional policy labels: copy the example config to /etc/log-viewer/policies.json and edit it for your rules.';
     return '<div class="fw-insight"><h3>Top sources</h3>' + topSources + '</div>' +
-      '<div class="fw-insight"><h3>Top destination ports</h3>' + topPorts + '</div>' +
+      '<div class="fw-insight"><h3>Destination ports <small>(' + sortedPorts.length + ' total)</small></h3>' + topPorts +
+        (sortedPorts.length > 5 ? '<button type="button" class="cbi-button fw-show-all-ports">' + (this.showAllPorts ? _('Show top five') : _('Show all ports')) + '</button>' : '') + '</div>' +
       '<div class="fw-insight"><h3>Top ASNs</h3>' + topAsns + '</div>' +
       '<div class="fw-insight"><h3>Scan / burst signals</h3><p class="fw-muted">Heuristic only: 8+ ports or 25+ events from one public source.</p>' + scanHtml + '</div>' +
       '<div class="fw-insight fw-insight-policy"><h3>Policy context</h3><p class="fw-muted">' + esc(policyNotes) + '</p>' +
-      '<p class="fw-muted">Observed ≠ allowed. Blocked and Allowed require explicit log evidence; default-deny policy cannot be inferred from silence.</p></div>';
+      '<p class="fw-muted">WAN watchlist hits are shown as Blocked under the default-deny policy. Explicit allow and port-forward rules can create exceptions; Allowed appears only when an allow rule logs it.</p></div>';
   },
 
 
@@ -409,6 +557,8 @@ return view.extend({
   refreshEvents: async function() {
     const generation = ++this.refreshGeneration;
     await this.loadPolicyRules();
+    await this.loadWatchConfig();
+    this.loadTrafficContext();
     const raw = await this.getLogData();
     if (generation !== this.refreshGeneration) return;
     const text = raw || '';
@@ -419,7 +569,7 @@ return view.extend({
       this.lastRawData = text;
       const lines = text.trim() ? text.trim().split('\n') : [];
       this.events = lines.map((line, i) => parseLine(line, i + 1))
-        .filter(Boolean).map(e => this.applyPolicy(e)).slice(-MAX_LINES).reverse();
+        .filter(Boolean).map(e => this.applyTrafficContext(this.applyPolicy(e))).slice(-MAX_LINES).reverse();
     }
     this.statusText.textContent = this.paused
       ? _('Auto-refresh paused · manually refreshed at ') + (new Date()).toLocaleTimeString()
@@ -473,8 +623,46 @@ return view.extend({
       ].join(' ').toLowerCase();
       return (this.kindFilter === 'all' || e.kind.toLowerCase() === this.kindFilter) &&
         (this.protoFilter === 'all' || e.protocol.toLowerCase() === this.protoFilter) &&
+        (!this.sourceFilter || e.source === this.sourceFilter) &&
+        (this.portFilter == null || Number(e.dport) === Number(this.portFilter)) &&
         searchable.includes(query);
     });
+  },
+
+  groupProbeEvents: function(events) {
+    if (!this.groupRepeated) return events.map(e => ({key: 'event-' + e.id, events: [e]}));
+    const map = new Map();
+    events.forEach(event => {
+      const key = JSON.stringify([event.source, event.destination, event.dport, event.protocol, event.kind]);
+      if (!map.has(key)) map.set(key, {key, events: []});
+      map.get(key).events.push(event);
+    });
+    return [...map.values()];
+  },
+
+  renderEventRow: function(e, repeated) {
+    const geo = this.geoCache[e.source] || {};
+    const countryCode = (geo.country_code || '').toUpperCase();
+    const country = geo.country_name || 'GeoIP unavailable';
+    const asn = geo.asn_organization || '';
+    const kindClass = e.kind === 'Blocked' ? 'blocked' : (e.kind === 'Allowed' ? 'allowed' : (e.kind === 'Exposed' ? 'exposed' : 'observed'));
+    const policyText = e.policyLabel || e.marker || e.prefix;
+    const title = [e.marker || e.prefix, e.policyNote].filter(Boolean).join(' · ');
+    return '<tr class="tr fw-' + kindClass + '">' +
+      '<td class="td fw-time">' + esc(e.timestamp) + (repeated ? '<small>' + repeated + ' repeated hits</small>' : '') + '</td>' +
+      '<td class="td fw-source"><span class="fw-flag" title="' + esc(country) + '">' + countryFlag(countryCode) + '</span> ' +
+        '<code>' + esc(e.source) + '</code> <button type="button" class="cbi-button fw-copy-ip" data-ip="' + esc(e.source) + '" title="Copy source IP">Copy</button>' +
+        '<small>' + esc(country) + (asn ? ' · ' + esc(asn) : '') + '</small></td>' +
+      '<td class="td"><code>' + esc(e.destination || '—') + '</code></td>' +
+      '<td class="td"><strong>' + esc(e.dport || '—') + '</strong><small>' + esc(e.service) + '</small></td>' +
+      '<td class="td">' + esc(e.protocol) + '</td>' +
+      '<td class="td"><span class="fw-badge ' + kindClass + '" title="' + esc(title) + '">' + esc(e.kind) + '</span><small class="fw-event-policy">' + esc(policyText || '—') + '</small></td>' +
+      '<td class="td fw-detail">SPT ' + esc(e.sport || '—') + ' · ' + esc(e.flags || '—') +
+        '<small>' + esc(e.iface || '—') + (e.ttl ? ' · TTL ' + esc(e.ttl) : '') + (e.policyNote ? ' · ' + esc(e.policyNote) : '') + '</small></td>' +
+      '<td class="td"><button type="button" class="cbi-button fw-event-details" data-id="' + e.id + '">' + esc(_('Details')) + '</button>' +
+        (this.showReputation ? '<a class="fw-reputation" href="https://www.abuseipdb.com/check/' + encodeURIComponent(e.source) +
+          '" target="_blank" rel="noreferrer" title="' + esc(_('Opens AbuseIPDB and shares this source IP with that service')) + '">' + esc(_('AbuseIPDB ↗')) + '</a>' :
+          '<small class="fw-muted">' + esc(_('External lookup hidden')) + '</small>') + '</td></tr>';
   },
 
   renderInsightsPanel: function() {
@@ -497,14 +685,16 @@ return view.extend({
     const windowed = this.getWindowedEvents();
     const matching = this.getMatchingEvents(windowed);
     this.filteredEvents = matching;
-    const events = matching.slice(0, this.maxEntries);
-    let blocked = 0, observed = 0, allowed = 0;
+    const groups = this.groupProbeEvents(matching);
+    const visibleGroups = groups.slice(0, this.maxEntries);
+    const events = visibleGroups.flatMap(group => group.events);
+    let blocked = 0, allowed = 0, exposed = 0;
     const uniqueSources = new Set();
     const countries = new Set();
     matching.forEach(e => {
       if (e.kind === 'Blocked') blocked++;
-      else if (e.kind === 'Observed') observed++;
       else if (e.kind === 'Allowed') allowed++;
+      else if (e.kind === 'Exposed') exposed++;
       if (e.source) uniqueSources.add(e.source);
       const country = (this.geoCache[e.source] || {}).country_code;
       if (country) countries.add(country);
@@ -513,40 +703,26 @@ return view.extend({
       ['MATCHING EVENTS', matching.length],
       ['UNIQUE SOURCES', uniqueSources.size],
       ['BLOCKED', blocked],
-      ['OBSERVED · VERDICT UNKNOWN', observed],
+      ['EXPOSED SERVICE HITS', exposed],
       ['ALLOWED · EXPLICIT LOGS', allowed],
       ['COUNTRIES', countries.size]
     ].map(function(item) {
       return '<div class="fw-stat"><span>' + item[0] + '</span><strong>' + item[1] + '</strong></div>';
     }).join('');
 
-    this.tbody.innerHTML = events.map(e => {
-      const geo = this.geoCache[e.source] || {};
-      const countryCode = (geo.country_code || '').toUpperCase();
-      const country = geo.country_name || 'GeoIP unavailable';
-      const asn = geo.asn_organization || '';
-      const kindClass = e.kind === 'Blocked' ? 'blocked' : (e.kind === 'Allowed' ? 'allowed' : 'observed');
-      const policyText = e.policyLabel || e.marker || e.prefix;
-      const title = [e.marker || e.prefix, e.policyNote].filter(Boolean).join(' · ');
-      return '<tr class="tr fw-' + kindClass + '">' +
-        '<td class="td fw-time">' + esc(e.timestamp) + '</td>' +
-        '<td class="td fw-source"><span class="fw-flag" title="' + esc(country) + '">' + countryFlag(countryCode) + '</span> ' +
-          '<code>' + esc(e.source) + '</code> <button type="button" class="cbi-button fw-copy-ip" data-ip="' + esc(e.source) + '" title="Copy source IP">Copy</button>' +
-          '<small>' + esc(country) + (asn ? ' · ' + esc(asn) : '') + '</small></td>' +
-        '<td class="td"><code>' + esc(e.destination || '—') + '</code></td>' +
-        '<td class="td"><strong>' + esc(e.dport || '—') + '</strong><small>' + esc(e.service) + '</small></td>' +
-        '<td class="td">' + esc(e.protocol) + '</td>' +
-        '<td class="td"><span class="fw-badge ' + kindClass + '" title="' + esc(title) + '">' + esc(e.kind) + '</span><small class="fw-event-policy">' + esc(policyText || '—') + '</small></td>' +
-        '<td class="td fw-detail">SPT ' + esc(e.sport || '—') + ' · ' + esc(e.flags || '—') +
-          '<small>' + esc(e.iface || '—') + (e.ttl ? ' · TTL ' + esc(e.ttl) : '') + (e.policyNote ? ' · ' + esc(e.policyNote) : '') + '</small></td>' +
-        '<td class="td"><button type="button" class="cbi-button fw-event-details" data-id="' + e.id + '">' + esc(_('Details')) + '</button>' +
-          (this.showReputation ? '<a class="fw-reputation" href="https://www.abuseipdb.com/check/' + encodeURIComponent(e.source) +
-            '" target="_blank" rel="noreferrer" title="' + esc(_('Opens AbuseIPDB and shares this source IP with that service')) + '">' + esc(_('AbuseIPDB ↗')) + '</a>' :
-            '<small class="fw-muted">' + esc(_('External lookup hidden')) + '</small>') + '</td></tr>';
-    }).join('') || '<tr><td colspan="8" class="center">No matching events in the selected window. Only explicitly logged DROP/REJECT/BLOCK and ALLOW/ACCEPT markers can prove a verdict.</td></tr>';
-    this.counter.textContent = events.length + ' shown · ' + matching.length + ' matched · ' + windowed.length + ' in window · ' + this.events.length + ' loaded';
-    this.loadMoreButton.hidden = events.length >= matching.length;
-    this.loadMoreButton.textContent = _('Load 500 more') + ' · ' + (matching.length - events.length) + _(' remaining');
+    this.tbody.innerHTML = visibleGroups.map(group => {
+      const newest = group.events[0];
+      const more = group.events.length - 1;
+      const header = more ? '<tr class="fw-group-row"><td colspan="8"><button type="button" class="fw-group-toggle" data-group-key="' + esc(group.key) + '">' +
+        (this.expandedProbeGroups.has(group.key) ? '▾' : '▸') + ' ' + esc(newest.source) + ' → ' + esc(newest.destination) + ':' + esc(newest.dport) + '/' + esc(newest.protocol) +
+        ' · ' + group.events.length + ' hits · ' + esc(newest.timestamp) + '</button></td></tr>' : '';
+      if (!more) return this.renderEventRow(newest, 0);
+      return header + (this.expandedProbeGroups.has(group.key) ? group.events.map(e => this.renderEventRow(e, 0)).join('') : this.renderEventRow(newest, more));
+    }).join('') || '<tr><td colspan="8" class="center">No matching firewall events in the selected window.</td></tr>';
+    this.counter.textContent = (this.groupRepeated ? visibleGroups.length + ' groups shown · ' : events.length + ' shown · ') +
+      matching.length + ' events matched · ' + windowed.length + ' in window · ' + this.events.length + ' loaded';
+    this.loadMoreButton.hidden = visibleGroups.length >= groups.length;
+    this.loadMoreButton.textContent = _('Load 500 more groups') + ' · ' + (groups.length - visibleGroups.length) + _(' remaining');
   },
 
   render: function() {
@@ -727,6 +903,24 @@ return view.extend({
         line-height: 1.45 !important;
       }
       .fw-shell .fw-insight-list li:last-child { border-bottom: 0 !important; }
+      .fw-shell .fw-insight-list li > button {
+        display: grid; grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) auto;
+        width: 100%; gap: 4px 10px; padding: 0; color: inherit; text-align: left;
+        background: transparent; border: 0; cursor: pointer;
+      }
+      .fw-shell .fw-insight-list li > button:hover code { border-color: var(--mp-cyan); }
+      .fw-shell .fw-group-option { display: inline-flex; align-items: center; gap: 6px; color: var(--mp-fg); }
+      .fw-shell .fw-group-option input { margin: 0; }
+      .fw-shell .fw-insight-port { grid-column: 1 / -1 !important; }
+      .fw-shell .fw-insights-disclosure > summary { cursor: pointer; font-weight: 800; padding: 8px 2px; }
+      .fw-shell .fw-settings-field { display: grid; gap: 6px; margin: 12px 0; font-weight: 700; }
+      .fw-shell .fw-watch-toggle { display: flex; align-items: center; gap: 8px; }
+      .fw-shell .fw-settings-field textarea { resize: vertical; }
+      .fw-shell .fw-group-row td { padding: 5px 10px !important; background: #211F23 !important; }
+      .fw-shell .fw-group-toggle { width: 100%; padding: 5px; color: var(--mp-cyan); text-align: left; background: transparent; border: 0; cursor: pointer; font-weight: 750; }
+      .fw-shell .fw-badge.exposed { color: #20232D !important; background: #78DCE8 !important; border-color: #A8EFF5 !important; }
+      .fw-shell .fw-insight-ip { display: flex; min-width: 0; align-items: center; gap: 5px; }
+      .fw-shell .fw-insight-ip code { overflow-wrap: anywhere; }
       .fw-shell .fw-insight-list li span {
         color: var(--mp-fg) !important;
         font-size: 12px !important;
@@ -819,6 +1013,7 @@ return view.extend({
       .fw-shell .fw-table tbody tr.fw-blocked { box-shadow: inset 3px 0 var(--mp-pink); }
       .fw-shell .fw-table tbody tr.fw-observed { box-shadow: inset 3px 0 var(--mp-yellow); }
       .fw-shell .fw-table tbody tr.fw-allowed { box-shadow: inset 3px 0 var(--mp-green); }
+      .fw-shell .fw-table tbody tr.fw-exposed { box-shadow: inset 3px 0 var(--mp-cyan); }
       .fw-shell .fw-table td {
         padding: 10px !important;
         color: var(--mp-fg) !important;
@@ -929,7 +1124,8 @@ return view.extend({
     this.kind = E('select', {class: 'cbi-input-select'}, [
       E('option', {value: 'all'}, _('All verdict types')),
       E('option', {value: 'blocked'}, _('Blocked only')),
-      E('option', {value: 'observed'}, _('Observed · verdict unknown')),
+      E('option', {value: 'exposed'}, _('Exposed service hits')),
+      E('option', {value: 'observed'}, _('Other interface / unclassified')),
       E('option', {value: 'allowed'}, _('Allowed · explicit logs only'))
     ]);
     this.proto = E('select', {class: 'cbi-input-select'}, [
@@ -972,6 +1168,11 @@ return view.extend({
     }}, _('Pause live'));
     this.tbody = E('tbody');
     this.insights = E('div', {class: 'fw-insights'});
+    this.insightsDisclosure = E('details', {class: 'fw-insights-disclosure'}, [
+      E('summary', {}, _('Insights · sources, ports, ASNs and scan patterns')),
+      this.insights
+    ]);
+    try { this.insightsDisclosure.open = localStorage.getItem('reffix-log-viewer.insights-open') === 'true'; } catch (e) {}
 
     const table = E('table', {class: 'table fw-table'}, [
       E('thead', {}, E('tr', {class: 'tr table-titles'},
@@ -981,7 +1182,7 @@ return view.extend({
     ]);
 
     const result = E('div', {class: 'fw-shell'}, [
-      E('p', {class: 'cbi-section-descr fw-description'}, _('Verdicts matter: Blocked requires explicit DROP/REJECT/BLOCK evidence. Observed means INFRA_PORT_HIT saw a packet, but final verdict is unknown because that watch rule returns and normal firewall policy handles it. Allowed appears only when an ALLOW/ACCEPT rule explicitly logs. Select a time window, pause live refresh, inspect top sources/ports/ASNs and scan-like bursts. GeoIP is local; MAC, TOS and packet-ID noise are omitted.')),
+      E('p', {class: 'cbi-section-descr fw-description'}, _('INFRA_PORT_HIT is a logging watchlist marker. On a default-deny WAN, hits are shown as Blocked unless you label the destination as an exposed service. An Exposed label is a port-forward match, not proof the connection was accepted. Allowed requires an explicit ALLOW/ACCEPT log. Select a time window, pause live refresh, inspect sources/ports/ASNs and scan-like bursts. GeoIP is local; MAC, TOS and packet-ID noise are omitted.')),
       this.stats,
       E('div', {class: 'fw-toolbar'}, [
         this.search, this.kind, this.proto, this.window,
@@ -992,17 +1193,35 @@ return view.extend({
         this.pauseButton,
         E('button', {class: 'cbi-button', click: () => this.exportCSV(false)}, _('Export filtered CSV')),
         E('button', {class: 'cbi-button', click: () => this.exportCSV(true)}, _('Export all loaded')),
+        E('button', {class: 'cbi-button', click: () => this.openTrafficSettings()}, _('WAN / exposed ports')),
+        E('label', {class: 'fw-group-option'}, [this.groupCheckbox = E('input', {type: 'checkbox', checked: this.groupRepeated, change: ev => {
+          this.groupRepeated = ev.target.checked;
+          try { localStorage.setItem('reffix-log-viewer.group-repeated', String(this.groupRepeated)); } catch (e) {}
+          this.maxEntries = 500;
+          this.renderRows();
+        }}), E('span', {}, _('Group repeated probes'))]),
+        E('button', {class: 'cbi-button', click: () => {
+          this.sourceFilter = ''; this.portFilter = null; this.renderRows();
+        }}, _('Clear source / port filter')),
         this.counter,
         this.statusText
       ]),
       E('div', {class: 'fw-status-row'}, [this.logStatus, this.geoStatusText]),
       this.reputationToggle,
-      this.insights,
+      this.insightsDisclosure,
       E('div', {class: 'fw-tablewrap'}, table),
       this.loadMoreButton
     ]);
 
     this.tbody.addEventListener('click', async ev => {
+      const groupButton = ev.target.closest('.fw-group-toggle');
+      if (groupButton) {
+        const key = groupButton.getAttribute('data-group-key');
+        if (this.expandedProbeGroups.has(key)) this.expandedProbeGroups.delete(key);
+        else this.expandedProbeGroups.add(key);
+        this.renderRows();
+        return;
+      }
       const detailButton = ev.target.closest('.fw-event-details');
       if (detailButton) {
         const event = this.events.find(item => String(item.id) === detailButton.getAttribute('data-id'));
@@ -1021,6 +1240,32 @@ return view.extend({
       catch (e) {
         ui.addNotification(null, E('p', _('Could not copy automatically. Select the IP text manually.')), 'warning');
       }
+    });
+    this.insights.addEventListener('click', ev => {
+      const portButton = ev.target.closest('.fw-insight-port');
+      const sourceButton = ev.target.closest('.fw-insight-filter');
+      if (portButton) {
+        this.portFilter = Number(portButton.getAttribute('data-port-filter'));
+        this.sourceFilter = '';
+      }
+      else if (sourceButton) {
+        this.sourceFilter = sourceButton.getAttribute('data-source-filter') || '';
+        this.portFilter = null;
+      }
+      else {
+        const allPorts = ev.target.closest('.fw-show-all-ports');
+        if (!allPorts) return;
+        this.showAllPorts = !this.showAllPorts;
+        this.renderInsightsPanel();
+        return;
+      }
+      this.search.value = '';
+      this.maxEntries = 500;
+      this.renderRows();
+      this.insightsDisclosure.open = false;
+    });
+    this.insightsDisclosure.addEventListener('toggle', () => {
+      try { localStorage.setItem('reffix-log-viewer.insights-open', String(this.insightsDisclosure.open)); } catch (e) {}
     });
     this.search.addEventListener('input', () => {
       clearTimeout(this.searchTimer);

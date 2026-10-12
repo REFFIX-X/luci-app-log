@@ -24,6 +24,10 @@ jobs:
           sh -n uninstall.sh
           sh -n root/usr/bin/flint4-geoip
           sh -n root/usr/bin/flint4-geoip-update
+          sh -n root/usr/sbin/infra-port-watch
+          sh -n root/usr/sbin/infra-port-watch-config
+          sh -n root/etc/init.d/infra-port-watch
+          sh -n root/etc/infra-port-watch.sh
       - name: JSON syntax
         run: |
           python3 -m json.tool root/usr/share/luci/menu.d/luci-app-log-viewer.json >/dev/null

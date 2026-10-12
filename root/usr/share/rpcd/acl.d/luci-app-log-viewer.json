@@ -18,6 +18,9 @@
         "/usr/bin/flint4-geoip": [
           "exec"
         ],
+        "/usr/sbin/infra-port-watch get": [
+          "exec"
+        ],
         "/usr/libexec/logread-ubox*": [
           "exec"
         ],
@@ -35,6 +38,13 @@
           "getDmesgSize",
           "getDmesgHash",
           "getLogfileSize"
+        ]
+      }
+    },
+    "write": {
+      "file": {
+        "/usr/sbin/infra-port-watch-config set": [
+          "exec"
         ]
       }
     }

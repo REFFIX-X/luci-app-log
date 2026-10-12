@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Classifies configured `INFRA_PORT_HIT` WAN watchlist entries as Blocked and clarifies default-deny behavior.
+- Adds clickable source, burst and destination-port insights, expandable repeated-probe groups, and a collapsible Insights panel.
+- Adds a router-configurable WAN interface and browser-local exposed-service labels to distinguish hits matching configured forwards.
+- Packages and enables a rate-limited, log-only WAN port watch with the existing Flint4 defaults; its interface and up to 256 ports are configurable from the Firewall Log UI.
+
 ## v2.1.0
 
 - Verifies both APK downloads against the published SHA-256 file before package installation.
