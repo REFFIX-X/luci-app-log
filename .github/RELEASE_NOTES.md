@@ -1,14 +1,15 @@
-# REFFIX Firewall Log v3.1.1
+# REFFIX Firewall Log v3.1.2
 
 OpenWrt 25.12 APK packages for the REFFIX Firewall Log and matching local GeoIP helper. The package retains the `luci-app-log-viewer` identity for in-place upgrades.
 
 ## What's included
 
 - IPv4-only, rate-limited log-only WAN watch with configurable interface and port list.
-- Grouped probes, source/port insights, a time-filtering activity timeline and browser-local optional history.
+- Line-by-line firewall events with paging, source/port insights, a time-filtering activity timeline and browser-local optional history.
+- A simpler main toolbar, larger table text and controls, and secondary settings under More options.
 - Portable browser settings and reviewed import of firewall-forward port labels.
 - OpenWrt 25.12 APK app and matching `libmaxminddb` helper with SHA-256 checksums.
-- Fixes WAN watcher post-upgrade startup when OpenWrt leaves `IPKG_INSTROOT` unset.
+- Retains the v3.1.1 fix for WAN watcher post-upgrade startup when OpenWrt leaves `IPKG_INSTROOT` unset.
 
 ## Important
 

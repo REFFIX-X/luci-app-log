@@ -4,8 +4,7 @@
 'require ui';
 
 const MAX_LINES = 1500;
-const GROUP_PAGE_SIZE = 100;
-const ROW_PAGE_SIZE = 100;
+const PAGE_SIZE = 100;
 const SERVICES = {
   21:'FTP',22:'SSH',23:'Telnet',25:'SMTP',53:'DNS',69:'TFTP',80:'HTTP',
   110:'POP3',123:'NTP',135:'MS RPC',139:'NetBIOS',143:'IMAP',161:'SNMP',
@@ -197,9 +196,6 @@ return view.extend({
   routerClockSyncedAt: 0,
   wanInterfaces: [],
   exposedPorts: {},
-  groupRepeated: true,
-  expandedProbeGroups: new Set(),
-  expandedGroupLimits: new Map(),
   showAllPorts: false,
   maxEntries: 100,
   historyRetention: 'off',
@@ -272,14 +268,12 @@ return view.extend({
           this.exposedPorts = Object.fromEntries(Object.entries(saved.exposedPorts)
             .filter(([port, label]) => /^\d{1,5}$/.test(port) && Number(port) > 0 && Number(port) <= 65535 && typeof label === 'string')
             .map(([port, label]) => [Number(port), label.trim() || ('Port ' + port)]));
-        this.groupRepeated = localStorage.getItem('reffix-log-viewer.group-repeated') !== 'false';
       }
       catch (e) {}
     }
     const activeInterface = this.watchConfig && (this.watchConfig.active_interface ||
       (this.watchConfig.wan_interface !== 'auto' ? this.watchConfig.wan_interface : ''));
     if (activeInterface) this.wanInterfaces = [String(activeInterface).trim().toLowerCase()];
-    if (this.groupCheckbox) this.groupCheckbox.checked = this.groupRepeated;
   },
 
   applyTrafficContext: function(event) {
@@ -363,7 +357,7 @@ return view.extend({
     this.kind.value = this.kindFilter = preset.kind;
     this.proto.value = this.protoFilter = preset.proto;
     this.window.value = this.timeFilter = preset.window;
-    this.maxEntries = GROUP_PAGE_SIZE;
+    this.maxEntries = PAGE_SIZE;
     this.renderRows();
     this.renderInsightsPanel();
   },
@@ -491,7 +485,6 @@ return view.extend({
         exposedPorts: this.exposedPorts,
         filterPresets: this.filterPresets,
         showReputation: this.showReputation,
-        groupRepeated: this.groupRepeated,
         historyRetention: this.historyRetention,
         insightsOpen: !!this.insightsDisclosure.open
       }
@@ -555,13 +548,11 @@ return view.extend({
           this.exposedPorts = exposedPorts;
           this.filterPresets = presets;
           this.showReputation = browser.showReputation === true;
-          this.groupRepeated = browser.groupRepeated !== false;
           this.historyRetention = ['off', '1', '7', '30'].includes(browser.historyRetention) ? browser.historyRetention : 'off';
           try {
             localStorage.setItem('reffix-log-viewer.traffic-context', JSON.stringify({exposedPorts}));
             localStorage.setItem('reffix-log-viewer.filters', JSON.stringify(presets));
             localStorage.setItem('reffix-log-viewer.external-reputation', String(this.showReputation));
-            localStorage.setItem('reffix-log-viewer.group-repeated', String(this.groupRepeated));
             localStorage.setItem('reffix-log-viewer.history-days', this.historyRetention);
             localStorage.setItem('reffix-log-viewer.insights-open', String(browser.insightsOpen === true));
           }
@@ -992,18 +983,7 @@ return view.extend({
     });
   },
 
-  groupProbeEvents: function(events) {
-    if (!this.groupRepeated) return events.map(e => ({key: 'event-' + e.id, events: [e]}));
-    const map = new Map();
-    events.forEach(event => {
-      const key = JSON.stringify([event.source, event.destination, event.dport, event.protocol, event.kind]);
-      if (!map.has(key)) map.set(key, {key, events: []});
-      map.get(key).events.push(event);
-    });
-    return [...map.values()];
-  },
-
-  renderEventRow: function(e, repeated) {
+  renderEventRow: function(e) {
     const geo = this.geoCache[e.source] || {};
     const countryCode = (geo.country_code || '').toUpperCase();
     const country = geo.country_name || 'GeoIP unavailable';
@@ -1011,21 +991,19 @@ return view.extend({
     const kindClass = e.kind === 'Blocked' ? 'blocked' : (e.kind === 'Allowed' ? 'allowed' : (e.kind === 'Exposed' ? 'exposed' : 'observed'));
     const policyText = e.policyLabel || e.marker || e.prefix;
     const title = [e.marker || e.prefix, e.policyNote].filter(Boolean).join(' · ');
-    return '<tr class="tr fw-' + kindClass + '">' +
-      '<td class="td fw-time">' + esc(e.timestamp) + (repeated ? '<small>' + repeated + ' repeated hits</small>' : '') + '</td>' +
+    return '<tr class="tr fw-' + kindClass + '" data-event-id="' + esc(e.id) + '">' +
+      '<td class="td fw-time">' + esc(e.timestamp) + '</td>' +
       '<td class="td fw-source"><span class="fw-flag" title="' + esc(country) + '">' + countryFlag(countryCode) + '</span> ' +
-        '<code>' + esc(e.source) + '</code> <button type="button" class="cbi-button fw-copy-ip" data-ip="' + esc(e.source) + '" title="Copy source IP">Copy</button>' +
+        '<code>' + esc(e.source) + '</code>' +
         '<small>' + esc(country) + (asn ? ' · ' + esc(asn) : '') + '</small></td>' +
       '<td class="td"><code>' + esc(e.destination || '—') + '</code></td>' +
-      '<td class="td"><strong>' + esc(e.dport || '—') + '</strong><small>' + esc(e.service) + '</small></td>' +
-      '<td class="td">' + esc(e.protocol) + '</td>' +
+      '<td class="td fw-port"><strong>' + esc(e.dport || '—') + '</strong><small>' + esc(e.service) + ' · ' + esc(e.protocol) + '</small></td>' +
       '<td class="td"><span class="fw-badge ' + kindClass + '" title="' + esc(title) + '">' + esc(e.kind) + '</span><small class="fw-event-policy">' + esc(policyText || '—') + '</small></td>' +
       '<td class="td fw-detail">SPT ' + esc(e.sport || '—') + ' · ' + esc(e.flags || '—') +
-        '<small>' + esc(e.iface || '—') + (e.ttl ? ' · TTL ' + esc(e.ttl) : '') + (e.policyNote ? ' · ' + esc(e.policyNote) : '') + '</small></td>' +
-      '<td class="td"><button type="button" class="cbi-button fw-event-details" data-id="' + e.id + '">' + esc(_('Details')) + '</button>' +
+        '<small>' + esc(e.iface || '—') + (e.ttl ? ' · TTL ' + esc(e.ttl) : '') + '</small></td>' +
+      '<td class="td"><button type="button" class="cbi-button fw-event-details" data-id="' + esc(e.id) + '">' + esc(_('Details')) + '</button>' +
         (this.showReputation ? '<a class="fw-reputation" href="https://www.abuseipdb.com/check/' + encodeURIComponent(e.source) +
-          '" target="_blank" rel="noreferrer" title="' + esc(_('Opens AbuseIPDB and shares this source IP with that service')) + '">' + esc(_('AbuseIPDB ↗')) + '</a>' :
-          '<small class="fw-muted">' + esc(_('External lookup hidden')) + '</small>') + '</td></tr>';
+          '" target="_blank" rel="noreferrer" title="' + esc(_('Opens AbuseIPDB and shares this source IP with that service')) + '">' + esc(_('AbuseIPDB ↗')) + '</a>' : '') + '</td></tr>';
   },
 
   renderInsightsPanel: function() {
@@ -1048,51 +1026,28 @@ return view.extend({
     const windowed = this.getWindowedEvents();
     const matching = this.getMatchingEvents(windowed);
     this.filteredEvents = matching;
-    const groups = this.groupProbeEvents(matching);
-    const visibleGroups = groups.slice(0, this.maxEntries);
-    const events = visibleGroups.flatMap(group => group.events);
+    const events = matching.slice(0, this.maxEntries);
     let blocked = 0, allowed = 0, exposed = 0;
-    const uniqueSources = new Set();
-    const countries = new Set();
     matching.forEach(e => {
       if (e.kind === 'Blocked') blocked++;
       else if (e.kind === 'Allowed') allowed++;
       else if (e.kind === 'Exposed') exposed++;
-      if (e.source) uniqueSources.add(e.source);
-      const country = (this.geoCache[e.source] || {}).country_code;
-      if (country) countries.add(country);
     });
     this.stats.innerHTML = [
       ['MATCHING EVENTS', matching.length],
-      ['UNIQUE SOURCES', uniqueSources.size],
       ['BLOCKED', blocked],
       ['EXPOSED SERVICE HITS', exposed],
-      ['ALLOWED · EXPLICIT LOGS', allowed],
-      ['COUNTRIES', countries.size]
+      ['ALLOWED · EXPLICIT LOGS', allowed]
     ].map(function(item) {
       return '<div class="fw-stat"><span>' + item[0] + '</span><strong>' + item[1] + '</strong></div>';
     }).join('');
 
-    this.tbody.innerHTML = visibleGroups.map(group => {
-      const newest = group.events[0];
-      const more = group.events.length - 1;
-      const expanded = this.expandedProbeGroups.has(group.key);
-      const header = more ? '<tr class="fw-group-row"><td colspan="8"><button type="button" class="fw-group-toggle" aria-expanded="' + expanded + '" data-group-key="' + esc(group.key) + '">' +
-        (this.expandedProbeGroups.has(group.key) ? '▾' : '▸') + ' ' + esc(newest.source) + ' → ' + esc(newest.destination) + ':' + esc(newest.dport) + '/' + esc(newest.protocol) +
-        ' · ' + group.events.length + ' hits · ' + esc(newest.timestamp) + '</button></td></tr>' : '';
-      if (!more) return this.renderEventRow(newest, 0);
-      if (!expanded) return header + this.renderEventRow(newest, more);
-      const limit = Math.min(group.events.length, this.expandedGroupLimits.get(group.key) || ROW_PAGE_SIZE);
-      const shown = group.events.slice(0, limit).map(event => this.renderEventRow(event, 0)).join('');
-      const loadRows = limit < group.events.length
-        ? '<tr class="fw-group-more"><td colspan="8"><button type="button" class="cbi-button fw-group-load-more" data-group-key="' + esc(group.key) + '">' +
-          _('Load next ') + ROW_PAGE_SIZE + _(' hits · ') + (group.events.length - limit) + _(' remaining') + '</button></td></tr>' : '';
-      return header + shown + loadRows;
-    }).join('') || '<tr><td colspan="8" class="center">No matching firewall events in the selected window.</td></tr>';
-    this.counter.textContent = (this.groupRepeated ? visibleGroups.length + ' groups shown · ' : events.length + ' shown · ') +
-      matching.length + ' events matched · ' + windowed.length + ' in window · ' + this.events.length + ' loaded';
-    this.loadMoreButton.hidden = visibleGroups.length >= groups.length;
-    this.loadMoreButton.textContent = _('Load ') + GROUP_PAGE_SIZE + _(' more groups') + ' · ' + (groups.length - visibleGroups.length) + _(' remaining');
+    this.tbody.innerHTML = events.map(event => this.renderEventRow(event)).join('') ||
+      '<tr><td colspan="7" class="center">No matching firewall events in the selected window.</td></tr>';
+    this.counter.textContent = _('Showing ') + events.length + _(' of ') + matching.length + _(' matching events · ') +
+      windowed.length + _(' in selected window · ') + this.events.length + _(' loaded');
+    this.loadMoreButton.hidden = events.length >= matching.length;
+    this.loadMoreButton.textContent = _('Show ') + PAGE_SIZE + _(' more events · ') + (matching.length - events.length) + _(' remaining');
   },
 
   render: function() {
@@ -1165,11 +1120,9 @@ return view.extend({
         font-variant-numeric: tabular-nums;
       }
       .fw-shell .fw-stat:nth-child(1) strong { color: var(--mp-cyan) !important; }
-      .fw-shell .fw-stat:nth-child(2) strong { color: var(--mp-purple) !important; }
-      .fw-shell .fw-stat:nth-child(3) strong { color: var(--mp-pink) !important; }
-      .fw-shell .fw-stat:nth-child(4) strong { color: var(--mp-yellow) !important; }
-      .fw-shell .fw-stat:nth-child(5) strong { color: var(--mp-green) !important; }
-      .fw-shell .fw-stat:nth-child(6) strong { color: var(--mp-orange) !important; }
+      .fw-shell .fw-stat:nth-child(2) strong { color: var(--mp-pink) !important; }
+      .fw-shell .fw-stat:nth-child(3) strong { color: var(--mp-cyan) !important; }
+      .fw-shell .fw-stat:nth-child(4) strong { color: var(--mp-green) !important; }
 
       .fw-shell .fw-toolbar {
         display: flex;
@@ -1279,8 +1232,6 @@ return view.extend({
         background: transparent; border: 0; cursor: pointer;
       }
       .fw-shell .fw-insight-list li > button:hover code { border-color: var(--mp-cyan); }
-      .fw-shell .fw-group-option { display: inline-flex; align-items: center; gap: 6px; color: var(--mp-fg); }
-      .fw-shell .fw-group-option input { margin: 0; }
       .fw-shell .fw-insight-port { grid-column: 1 / -1 !important; }
       .fw-shell .fw-insights-disclosure > summary { cursor: pointer; font-weight: 800; padding: 8px 2px; }
       .fw-shell .fw-timeline { height: 96px; display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); align-items: end; gap: 3px; margin: 12px 0 4px; }
@@ -1293,8 +1244,6 @@ return view.extend({
       .fw-shell .fw-settings-field { display: grid; gap: 6px; margin: 12px 0; font-weight: 700; }
       .fw-shell .fw-watch-toggle { display: flex; align-items: center; gap: 8px; }
       .fw-shell .fw-settings-field textarea { resize: vertical; }
-      .fw-shell .fw-group-row td { padding: 5px 10px !important; background: #211F23 !important; }
-      .fw-shell .fw-group-toggle { width: 100%; padding: 5px; color: var(--mp-cyan); text-align: left; background: transparent; border: 0; cursor: pointer; font-weight: 750; }
       .fw-shell .fw-badge.exposed { color: #20232D !important; background: #78DCE8 !important; border-color: #A8EFF5 !important; }
       .fw-shell .fw-insight-ip { display: flex; min-width: 0; align-items: center; gap: 5px; }
       .fw-shell .fw-insight-ip code { overflow-wrap: anywhere; }
@@ -1442,17 +1391,6 @@ return view.extend({
         text-decoration: none;
       }
       .fw-shell .fw-table a:hover { color: #B8F3F8 !important; text-decoration: underline; }
-      .fw-shell .fw-copy-ip {
-        min-height: 25px !important;
-        margin-left: 4px;
-        padding: 2px 7px !important;
-        color: var(--mp-cyan) !important;
-        background: #2D3940 !important;
-        border: 1px solid #53666B !important;
-        border-radius: 5px !important;
-        font-size: 11px !important;
-        font-weight: 750;
-      }
       .fw-shell .fw-badge {
         display: inline-block;
         padding: 4px 8px !important;
@@ -1486,8 +1424,47 @@ return view.extend({
         outline: 2px solid var(--mp-purple) !important;
         outline-offset: 2px;
       }
+      .fw-shell .fw-description { font-size: 15px !important; line-height: 1.6 !important; }
+      .fw-shell .fw-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+      .fw-shell .fw-stat span { font-size: 13px !important; }
+      .fw-shell .fw-stat strong { font-size: 28px !important; }
+      .fw-shell .fw-primary-toolbar { align-items: stretch; gap: 10px; margin: 14px 0 8px; }
+      .fw-shell .fw-primary-toolbar input,
+      .fw-shell .fw-primary-toolbar select { min-height: 44px; font-size: 15px !important; }
+      .fw-shell .fw-primary-toolbar input { flex: 2 1 240px; }
+      .fw-shell .fw-primary-toolbar select { flex: 1 1 145px; }
+      .fw-shell .fw-primary-toolbar button,
+      .fw-shell .fw-secondary-toolbar button,
+      .fw-shell .fw-history-toolbar button,
+      .fw-shell .fw-file-import { min-height: 42px !important; padding: 9px 14px !important; font-size: 14px !important; }
+      .fw-shell .fw-results-meta { display: flex; flex-wrap: wrap; gap: 5px 16px; margin: 8px 0 12px; color: var(--mp-muted); font-size: 14px !important; line-height: 1.5; }
+      .fw-shell .fw-results-meta .right { color: var(--mp-fg) !important; font-size: 14px !important; }
+      .fw-shell .fw-more-actions { margin: 12px 0; border: 1px solid var(--mp-border); border-radius: 8px; background: var(--mp-panel); }
+      .fw-shell .fw-more-actions > summary { padding: 12px 14px; cursor: pointer; font-size: 15px; font-weight: 750; }
+      .fw-shell .fw-more-content { display: grid; gap: 10px; padding: 0 14px 14px; }
+      .fw-shell .fw-secondary-toolbar { gap: 8px; }
+      .fw-shell .fw-secondary-toolbar select { min-width: 190px; min-height: 42px; font-size: 14px !important; }
+      .fw-shell .fw-status-row,
+      .fw-shell .fw-history-toolbar,
+      .fw-shell .fw-privacy { font-size: 14px !important; line-height: 1.5; }
+      .fw-shell .fw-history-control select { min-height: 42px; font-size: 14px !important; }
+      .fw-shell .fw-insights-disclosure > summary { font-size: 15px; }
+      .fw-shell .fw-table { min-width: 960px; font-size: 15px !important; }
+      .fw-shell .fw-table thead th { padding: 13px 12px !important; font-size: 14px !important; }
+      .fw-shell .fw-table td { padding: 13px 12px !important; font-size: 15px !important; line-height: 1.55 !important; }
+      .fw-shell .fw-time { min-width: 150px; font-size: 14px !important; }
+      .fw-shell .fw-source { min-width: 210px; }
+      .fw-shell .fw-source code { font-size: 14px !important; }
+      .fw-shell .fw-source small,
+      .fw-shell .fw-detail small,
+      .fw-shell .fw-table td:nth-child(4) small { font-size: 13px !important; }
+      .fw-shell .fw-table code { font-size: 14px !important; }
+      .fw-shell .fw-event-policy { font-size: 13px !important; }
+      .fw-shell .fw-badge { padding: 5px 9px !important; font-size: 14px !important; }
+      .fw-shell .fw-event-details { min-height: 38px !important; padding: 7px 12px !important; font-size: 14px !important; }
+      .fw-shell .fw-load-more { min-height: 44px !important; margin-top: 12px; font-size: 15px !important; }
       @media (max-width: 1200px) {
-        .fw-shell .fw-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .fw-shell .fw-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       }
       @media (max-width: 800px) {
         .fw-shell { padding: 10px; }
@@ -1547,10 +1524,10 @@ return view.extend({
       E('span', {}, _('Show AbuseIPDB links (opening one shares its source IP with that service)'))
     ]);
     this.loadMoreButton = E('button', {class: 'cbi-button fw-load-more', hidden: true, click: () => {
-      this.maxEntries += GROUP_PAGE_SIZE;
+      this.maxEntries += PAGE_SIZE;
       this.renderRows();
-    }}, _('Load ') + GROUP_PAGE_SIZE + _(' more'));
-    this.pauseButton = E('button', {class: 'cbi-button', click: () => {
+    }}, _('Show ') + PAGE_SIZE + _(' more events'));
+    this.pauseButton = E('button', {class: 'cbi-button fw-pause-button', click: () => {
       this.paused = !this.paused;
       this.pauseButton.textContent = this.paused ? _('Resume live') : _('Pause live');
       this.statusText.textContent = this.paused ? _('Auto-refresh paused') : _('Auto-refresh every 15s');
@@ -1565,94 +1542,62 @@ return view.extend({
 
     const table = E('table', {class: 'table fw-table'}, [
       E('thead', {}, E('tr', {class: 'tr table-titles'},
-        ['Time', 'Source / GeoIP', 'Destination', 'Port / Service', 'Proto', 'Event', 'Packet', 'Action']
+        ['Time', 'Source / GeoIP', 'Destination', 'Port / Protocol', 'Verdict', 'Packet', 'Details']
           .map(t => E('th', {class: 'th'}, _(t))))),
       this.tbody
     ]);
 
-    const result = E('div', {class: 'fw-shell'}, [
-      E('p', {class: 'cbi-section-descr fw-description'}, _('INFRA_PORT_HIT is a logging watchlist marker. On a default-deny WAN, hits are shown as Blocked unless you label the destination as an exposed service. An Exposed label is a port-forward match, not proof the connection was accepted. Allowed requires an explicit ALLOW/ACCEPT log. Select a time window, pause live refresh, inspect sources/ports/ASNs and scan-like bursts. GeoIP is local; MAC, TOS and packet-ID noise are omitted.')),
-      this.stats,
-      E('div', {class: 'fw-toolbar'}, [
-        this.search, this.kind, this.proto, this.window,
-        this.presets,
-        E('button', {class: 'cbi-button', click: () => this.saveFilterPreset()}, _('Save filter')),
-        E('button', {class: 'cbi-button', click: () => this.removeFilterPreset()}, _('Delete saved filter')),
-        E('button', {class: 'cbi-button cbi-button-action', click: () => this.refreshEvents().catch(e => ui.addNotification(null, E('p', e.message), 'error'))}, _('Refresh')),
-        this.pauseButton,
-        E('button', {class: 'cbi-button', click: () => this.exportCSV(false)}, _('Export filtered CSV')),
-        E('button', {class: 'cbi-button', click: () => this.exportCSV(true)}, _('Export all loaded')),
-        E('button', {class: 'cbi-button', click: () => this.openTrafficSettings()}, _('WAN / exposed ports')),
-        E('button', {class: 'cbi-button', click: () => this.importFirewallForwards()}, _('Import firewall forwards')),
-        E('button', {class: 'cbi-button', click: () => this.exportSettings()}, _('Export settings')),
-        E('label', {class: 'fw-file-import'}, [E('span', {}, _('Import settings')), this.settingsFile = E('input', {type: 'file', accept: 'application/json,.json', 'aria-label': _('Import Firewall Log settings file'), change: ev => {
-          const file = ev.target.files && ev.target.files[0];
-          if (file) this.importSettings(file);
-          ev.target.value = '';
-        }})]),
-        E('label', {class: 'fw-group-option'}, [this.groupCheckbox = E('input', {type: 'checkbox', checked: this.groupRepeated, change: ev => {
-          this.groupRepeated = ev.target.checked;
-          try { localStorage.setItem('reffix-log-viewer.group-repeated', String(this.groupRepeated)); } catch (e) {}
-          this.maxEntries = GROUP_PAGE_SIZE;
-          this.renderRows();
-        }}), E('span', {}, _('Group repeated probes'))]),
-        E('button', {class: 'cbi-button', click: () => {
-          this.sourceFilter = ''; this.portFilter = null; this.timelineRange = null; this.renderRows(); this.renderInsightsPanel();
-        }}, _('Clear source / port filter')),
-        this.counter,
-        this.statusText
-      ]),
-      E('div', {class: 'fw-toolbar fw-history-toolbar'}, [
-        E('label', {class: 'fw-history-control'}, [E('span', {}, _('Browser-local history')), this.historyRetentionSelect]),
-        E('button', {class: 'cbi-button', click: () => this.clearLocalHistory().catch(e => ui.addNotification(null, E('p', e.message), 'error'))}, _('Clear local history')),
-        E('span', {class: 'fw-muted'}, _('Stored in this browser only · max 10,000 events'))
-      ]),
-      E('div', {class: 'fw-status-row'}, [this.logStatus, this.watchStatusText, this.geoStatusText, this.historyStatusText]),
-      this.reputationToggle,
-      this.insightsDisclosure,
-      E('div', {class: 'fw-tablewrap'}, table),
-      this.loadMoreButton
+    const advancedActions = E('details', {class: 'fw-more-actions'}, [
+      E('summary', {}, _('More options')),
+      E('div', {class: 'fw-more-content'}, [
+        E('div', {class: 'fw-toolbar fw-secondary-toolbar'}, [
+          this.presets,
+          E('button', {class: 'cbi-button', click: () => this.saveFilterPreset()}, _('Save filter')),
+          E('button', {class: 'cbi-button', click: () => this.removeFilterPreset()}, _('Delete saved filter')),
+          E('button', {class: 'cbi-button', click: () => this.exportCSV(true)}, _('Export all loaded')),
+          E('button', {class: 'cbi-button', click: () => this.openTrafficSettings()}, _('WAN / exposed ports')),
+          E('button', {class: 'cbi-button', click: () => this.importFirewallForwards()}, _('Import firewall forwards')),
+          E('button', {class: 'cbi-button', click: () => this.exportSettings()}, _('Export settings')),
+          E('label', {class: 'fw-file-import'}, [E('span', {}, _('Import settings')), this.settingsFile = E('input', {type: 'file', accept: 'application/json,.json', 'aria-label': _('Import Firewall Log settings file'), change: ev => {
+            const file = ev.target.files && ev.target.files[0];
+            if (file) this.importSettings(file);
+            ev.target.value = '';
+          }})]),
+          E('button', {class: 'cbi-button', click: () => {
+            this.sourceFilter = ''; this.portFilter = null; this.timelineRange = null; this.renderRows(); this.renderInsightsPanel();
+          }}, _('Clear insight filters'))
+        ]),
+        E('div', {class: 'fw-toolbar fw-history-toolbar'}, [
+          E('label', {class: 'fw-history-control'}, [E('span', {}, _('Browser-local history')), this.historyRetentionSelect]),
+          E('button', {class: 'cbi-button', click: () => this.clearLocalHistory().catch(e => ui.addNotification(null, E('p', e.message), 'error'))}, _('Clear local history')),
+          E('span', {class: 'fw-muted'}, _('Stored in this browser only · max 10,000 events'))
+        ]),
+        E('div', {class: 'fw-status-row'}, [this.logStatus, this.watchStatusText, this.geoStatusText, this.historyStatusText]),
+        this.reputationToggle
+      ])
     ]);
 
-    this.tbody.addEventListener('click', async ev => {
-      const groupButton = ev.target.closest('.fw-group-toggle');
-      if (groupButton) {
-        const key = groupButton.getAttribute('data-group-key');
-        if (this.expandedProbeGroups.has(key)) {
-          this.expandedProbeGroups.delete(key);
-          this.expandedGroupLimits.delete(key);
-        }
-        else {
-          this.expandedProbeGroups.add(key);
-          this.expandedGroupLimits.set(key, ROW_PAGE_SIZE);
-        }
-        this.renderRows();
-        return;
-      }
-      const groupMore = ev.target.closest('.fw-group-load-more');
-      if (groupMore) {
-        const key = groupMore.getAttribute('data-group-key');
-        this.expandedGroupLimits.set(key, (this.expandedGroupLimits.get(key) || ROW_PAGE_SIZE) + ROW_PAGE_SIZE);
-        this.renderRows();
-        return;
-      }
+    const result = E('div', {class: 'fw-shell'}, [
+      E('p', {class: 'cbi-section-descr fw-description'}, _('Each row is one firewall event. WAN watchlist hits are Blocked unless the destination has an exposed-service label. Allowed requires an explicit ALLOW/ACCEPT log. GeoIP lookups stay local.')),
+      this.stats,
+      E('div', {class: 'fw-toolbar fw-primary-toolbar'}, [
+        this.search, this.kind, this.proto, this.window,
+        E('button', {class: 'cbi-button cbi-button-action', click: () => this.refreshEvents().catch(e => ui.addNotification(null, E('p', e.message), 'error'))}, _('Refresh')),
+        this.pauseButton,
+        E('button', {class: 'cbi-button cbi-button-action fw-export-button', click: () => this.exportCSV(false)}, _('Export filtered CSV'))
+      ]),
+      E('div', {class: 'fw-results-meta'}, [this.counter, this.statusText]),
+      this.insightsDisclosure,
+      E('div', {class: 'fw-tablewrap'}, table),
+      this.loadMoreButton,
+      advancedActions
+    ]);
+
+    this.tbody.addEventListener('click', ev => {
       const detailButton = ev.target.closest('.fw-event-details');
       if (detailButton) {
         const event = this.events.find(item => String(item.id) === detailButton.getAttribute('data-id'));
         if (event) this.showEventDetails(event);
-        return;
-      }
-      const button = ev.target.closest('.fw-copy-ip');
-      if (!button) return;
-      const ip = button.getAttribute('data-ip') || '';
-      try {
-        if (!navigator.clipboard || !navigator.clipboard.writeText)
-          throw new Error('Clipboard API unavailable');
-        await navigator.clipboard.writeText(ip);
-        ui.addNotification(null, E('p', _('Copied IP: ') + ip), 'info');
-      }
-      catch (e) {
-        ui.addNotification(null, E('p', _('Could not copy automatically. Select the IP text manually.')), 'warning');
       }
     });
     this.insights.addEventListener('click', ev => {
@@ -1660,14 +1605,14 @@ return view.extend({
       if (timelineButton) {
         const start = Number(timelineButton.getAttribute('data-timeline-start'));
         this.timelineRange = {start, end: Number(timelineButton.getAttribute('data-timeline-end'))};
-        this.maxEntries = GROUP_PAGE_SIZE;
+        this.maxEntries = PAGE_SIZE;
         this.renderRows();
         this.renderInsightsPanel();
         return;
       }
       if (ev.target.closest('.fw-clear-timeline')) {
         this.timelineRange = null;
-        this.maxEntries = GROUP_PAGE_SIZE;
+        this.maxEntries = PAGE_SIZE;
         this.renderRows();
         this.renderInsightsPanel();
         return;
@@ -1690,7 +1635,7 @@ return view.extend({
         return;
       }
       this.search.value = '';
-      this.maxEntries = GROUP_PAGE_SIZE;
+      this.maxEntries = PAGE_SIZE;
       this.renderRows();
       this.insightsDisclosure.open = false;
     });
@@ -1700,16 +1645,16 @@ return view.extend({
     this.search.addEventListener('input', () => {
       clearTimeout(this.searchTimer);
       this.searchTimer = setTimeout(() => {
-        this.maxEntries = GROUP_PAGE_SIZE;
+        this.maxEntries = PAGE_SIZE;
         this.renderRows();
       }, 120);
     });
-    this.kind.addEventListener('change', () => { this.kindFilter = this.kind.value; this.maxEntries = GROUP_PAGE_SIZE; this.renderRows(); });
-    this.proto.addEventListener('change', () => { this.protoFilter = this.proto.value; this.maxEntries = GROUP_PAGE_SIZE; this.renderRows(); });
+    this.kind.addEventListener('change', () => { this.kindFilter = this.kind.value; this.maxEntries = PAGE_SIZE; this.renderRows(); });
+    this.proto.addEventListener('change', () => { this.protoFilter = this.proto.value; this.maxEntries = PAGE_SIZE; this.renderRows(); });
     this.window.addEventListener('change', () => {
       this.timeFilter = this.window.value;
       this.timelineRange = null;
-      this.maxEntries = GROUP_PAGE_SIZE;
+      this.maxEntries = PAGE_SIZE;
       this.renderRows();
       this.renderInsightsPanel();
     });
