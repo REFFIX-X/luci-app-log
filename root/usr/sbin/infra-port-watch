@@ -5,6 +5,8 @@ set -eu
 CONFIG=infra-port-watch.main
 MATCH_CHAIN=REFFIX_INFRA_WATCH
 LOG_CHAIN=INFRA_PORT_LOG
+. /lib/functions.sh
+. /usr/share/libubox/jshn.sh
 
 uci_get() { uci -q get "$1" 2>/dev/null || true; }
 
@@ -130,8 +132,45 @@ print_config() {
 	active=""
 	if [ "$enabled" = 1 ]; then active="$(resolve_wan 2>/dev/null || true)"; fi
 	ports_json="$(printf '%s' "$NORMALIZED_PORTS" | awk '{ for (i=1;i<=NF;i++) printf "%s%s", (i==1?"":","), $i }')"
-	printf '{"enabled":%s,"wan_interface":"%s","active_interface":"%s","ports":"%s"}\n' \
-		"$([ "$enabled" = 1 ] && echo true || echo false)" "$wan" "$active" "$ports_json"
+	installed=0
+	if [ "$enabled" = 1 ] && [ -n "$active" ] && command -v iptables >/dev/null 2>&1 &&
+		iptables -t raw -C PREROUTING -j "$MATCH_CHAIN" 2>/dev/null; then installed=1; fi
+	json_init
+	json_add_boolean enabled "$([ "$enabled" = 1 ] && echo 1 || echo 0)"
+	json_add_string wan_interface "$wan"
+	json_add_string active_interface "$active"
+	json_add_string ports "$ports_json"
+	json_add_string router_time "$(date +%s 2>/dev/null || echo 0)"
+	json_add_string router_offset "$(date +%z 2>/dev/null || echo '')"
+	json_add_boolean installed "$installed"
+	json_add_string address_family 'IPv4 only'
+	json_add_string log_rate '10 per minute after burst of 20'
+	json_add_array redirects
+	config_load firewall
+	config_foreach add_redirect redirect
+	json_close_array
+	json_dump
+}
+
+add_redirect() {
+	section="$1"
+	config_get redirect_enabled "$section" enabled 1
+	[ "$redirect_enabled" = 0 ] && return 0
+	config_get target "$section" target DNAT
+	[ "$target" = DNAT ] || return 0
+	config_get source_zone "$section" src
+	config_get source_ports "$section" src_dport
+	[ -n "$source_zone" ] && [ -n "$source_ports" ] || return 0
+	config_get name "$section" name
+	config_get protocol "$section" proto tcp
+	config_get destination_port "$section" dest_port
+	json_add_object
+	json_add_string name "$name"
+	json_add_string source_zone "$source_zone"
+	json_add_string source_ports "$source_ports"
+	json_add_string destination_port "$destination_port"
+	json_add_string protocol "$protocol"
+	json_close_object
 }
 
 case "${1:-}" in

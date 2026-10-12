@@ -1,20 +1,17 @@
-# REFFIX luci-app-log v1.5.0-r7
+# REFFIX Firewall Log v3.1.0
 
-This is a **source-only pre-release** of the REFFIX fork of `luci-app-log-viewer`, adding a general-purpose firewall log page.
+OpenWrt 25.12 APK packages for the REFFIX Firewall Log and matching local GeoIP helper. The package retains the `luci-app-log-viewer` identity for in-place upgrades.
 
 ## What's included
 
-- New general-purpose Firewall Log LuCI view.
-- Local GeoLite2 Country and ASN enrichment using `mmdblookup`.
-- Filtering, search, CSV export, service/port labels and periodic refresh.
-- LuCI menu and RPC ACL entries, overlay install/uninstall scripts.
-- Updated installation and troubleshooting documentation.
+- IPv4-only, rate-limited log-only WAN watch with configurable interface and port list.
+- Grouped probes, source/port insights, a time-filtering activity timeline and browser-local optional history.
+- Portable browser settings and reviewed import of firewall-forward port labels.
+- OpenWrt 25.12 APK app and matching `libmaxminddb` helper with SHA-256 checksums.
 
 ## Important
 
-- This release does **not** include a prebuilt APK/IPK.
-- The overlay assumes the upstream `luci-app-log-viewer` package is already installed.
-- The source passes automated JavaScript, shell and JSON validation, but has not yet been verified on every OpenWrt release/theme or exhaustively tested on router hardware.
-- GeoLite2 databases are downloaded separately by the helper and are not included in this release. See the README for the data source and licensing notes.
+- Tests cover JavaScript syntax, firewall parser behavior, installer checksum handling, shell syntax and JSON syntax.
+- GeoLite2 databases are downloaded separately by the helper and are not included in the APK. See the README for data source and licensing notes.
 
-Install using the source overlay steps in [README.md](https://github.com/REFFIX-X/luci-app-log/blob/main/README.md).
+See the [README](https://github.com/REFFIX-X/luci-app-log/blob/main/README.md) for supported router targets and installation instructions.

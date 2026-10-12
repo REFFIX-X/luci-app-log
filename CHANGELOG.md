@@ -1,5 +1,16 @@
 # Changelog
 
+## v3.1.0
+
+- Classifies configured `INFRA_PORT_HIT` WAN watchlist entries as Blocked and clarifies default-deny behavior.
+- Adds clickable source, burst and destination-port insights, expandable repeated-probe groups, and a collapsible Insights panel.
+- Adds a router-configurable WAN interface and browser-local exposed-service labels to distinguish hits matching configured forwards.
+- Packages and enables a rate-limited, log-only WAN port watch with the existing Flint4 defaults; its interface and up to 256 ports are configurable from the Firewall Log UI.
+- Adds router-timezone-aware event filtering, a selectable activity timeline, and IPv4-only watcher status.
+- Adds browser-local optional history with retention and a 10,000-event cap, plus reviewed firewall-forward label imports and portable settings files.
+- Bounds log-group and expanded-row rendering pages and caches local history in memory between refreshes.
+- Improves filter and file-import accessibility, reports the 1,500-source-line limit, and retains the theme unchanged.
+
 ## v3.0.0
 
 - Makes Firewall Log the only page and renames the Status menu entry to Firewall Log.

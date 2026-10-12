@@ -4,6 +4,8 @@
 'require ui';
 
 const MAX_LINES = 1500;
+const GROUP_PAGE_SIZE = 100;
+const ROW_PAGE_SIZE = 100;
 const SERVICES = {
   21:'FTP',22:'SSH',23:'Telnet',25:'SMTP',53:'DNS',69:'TFTP',80:'HTTP',
   110:'POP3',123:'NTP',135:'MS RPC',139:'NetBIOS',143:'IMAP',161:'SNMP',
@@ -35,12 +37,7 @@ function csvCell(value) {
 
 function isPublic(ip) {
   if (!ip || ip === '-' || ip === '0.0.0.0') return false;
-  if (ip.indexOf(':') >= 0) {
-    const s = ip.toLowerCase();
-    return !(s === '::' || s === '::1' || s.startsWith('fc') ||
-      s.startsWith('fd') || s.startsWith('fe8') || s.startsWith('fe9') ||
-      s.startsWith('fea') || s.startsWith('feb'));
-  }
+  if (ip.indexOf(':') >= 0) return false;
   const p = ip.split('.').map(Number);
   if (p.length !== 4 || p.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return false;
   return !(p[0] === 10 || p[0] === 127 || p[0] === 0 || p[0] >= 224 ||
@@ -59,7 +56,19 @@ function parseFields(line) {
   return result;
 }
 
-function parseLine(line, index) {
+function parseRouterTimestamp(timestamp, routerOffset) {
+  const fields = String(timestamp || '').match(/^[A-Z][a-z]{2}\s+(\w{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})$/);
+  const offset = String(routerOffset || '').match(/^([+-])(\d{2})(\d{2})$/);
+  if (!fields || !offset) return null;
+  const months = {Jan:0, Feb:1, Mar:2, Apr:3, May:4, Jun:5, Jul:6, Aug:7, Sep:8, Oct:9, Nov:10, Dec:11};
+  const month = months[fields[1]];
+  if (month == null) return null;
+  const wallTime = Date.UTC(Number(fields[6]), month, Number(fields[2]), Number(fields[3]), Number(fields[4]), Number(fields[5]));
+  const minutesEast = (Number(offset[2]) * 60 + Number(offset[3])) * (offset[1] === '-' ? -1 : 1);
+  return wallTime - minutesEast * 60000;
+}
+
+function parseLine(line, index, routerOffset) {
   const infraHit = line.includes('INFRA_PORT_HIT:');
   const hasPacketTuple = /SRC=\S+.*DPT=\d+/.test(line);
   const blockMarker = /\b(?:DROP|REJECT)\b/i.test(line) ||
@@ -88,7 +97,8 @@ function parseLine(line, index) {
   const fields = parseFields(line);
   const port = Number(fields.DPT || 0);
   const timestamp = (line.match(/^([A-Z][a-z]{2}\s+\w{3}\s+\d+\s+[\d:]+\s+\d{4})/) || ['', ''])[1];
-  const timestampMs = timestamp ? Date.parse(timestamp) : NaN;
+  const routerTimestampMs = timestamp ? parseRouterTimestamp(timestamp, routerOffset) : null;
+  const timestampMs = routerTimestampMs == null && timestamp ? Date.parse(timestamp) : routerTimestampMs;
 
   return {
     id: index,
@@ -127,12 +137,51 @@ function countryFlag(code) {
     '" width="20" loading="lazy" decoding="async">';
 }
 
+let historyDatabasePromise = null;
+function openHistoryDatabase() {
+  if (!window.indexedDB) return Promise.reject(new Error('IndexedDB is unavailable in this browser'));
+  if (historyDatabasePromise) return historyDatabasePromise;
+  historyDatabasePromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open('reffix-firewall-log', 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains('events')) {
+        const store = db.createObjectStore('events', {keyPath: 'key'});
+        store.createIndex('timestampMs', 'timestampMs', {unique: false});
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('Unable to open local event history'));
+    request.onblocked = () => reject(new Error('Close other Firewall Log tabs to upgrade local history'));
+  }).catch(error => {
+    historyDatabasePromise = null;
+    throw error;
+  });
+  return historyDatabasePromise;
+}
+
+function historyRequest(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('Local history request failed'));
+  });
+}
+
+function historyTransactionDone(transaction) {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error || new Error('Local history write failed'));
+    transaction.onabort = () => reject(transaction.error || new Error('Local history write was cancelled'));
+  });
+}
+
 return view.extend({
   viewName: 'firewall',
   title: _('Firewall Log'),
   events: [],
   geoCache: {},
   geoCacheAt: {},
+  geoLookupInFlight: new Map(),
   kindFilter: 'all',
   protoFilter: 'all',
   timeFilter: 'all',
@@ -144,12 +193,20 @@ return view.extend({
   trafficContextLoaded: false,
   watchConfig: null,
   watchConfigLoaded: false,
+  routerClockAtSync: 0,
+  routerClockSyncedAt: 0,
   wanInterfaces: [],
   exposedPorts: {},
   groupRepeated: true,
   expandedProbeGroups: new Set(),
+  expandedGroupLimits: new Map(),
   showAllPorts: false,
-  maxEntries: 500,
+  maxEntries: 100,
+  historyRetention: 'off',
+  historyCache: null,
+  historySeedPending: false,
+  timelineRange: null,
+  liveEvents: [],
   sourceLineCount: 0,
   lastCollectedAt: 0,
   lastRawData: null,
@@ -182,12 +239,14 @@ return view.extend({
     }
   },
 
-  loadWatchConfig: async function() {
-    if (this.watchConfigLoaded) return;
+  loadWatchConfig: async function(force) {
+    if (this.watchConfigLoaded && !force) return;
     this.watchConfigLoaded = true;
     try {
       const raw = await fs.exec_direct('/usr/sbin/infra-port-watch', ['get'], 'text');
       this.watchConfig = JSON.parse(raw || '{}');
+      this.routerClockAtSync = Number(this.watchConfig.router_time || 0) * 1000;
+      this.routerClockSyncedAt = Date.now();
     }
     catch (e) {
       this.watchConfig = null;
@@ -195,30 +254,28 @@ return view.extend({
   },
 
   loadTrafficContext: function() {
-    if (this.trafficContextLoaded) return;
-    this.trafficContextLoaded = true;
+    if (!this.trafficContextLoaded) {
+      this.trafficContextLoaded = true;
+      // Use explicitly configured allow labels as useful defaults; the user can
+      // edit these independently in this browser's traffic-context settings.
+      this.exposedPorts = {};
+      this.policyRules.forEach(rule => {
+        if (!rule || !/_ALLOW$|_EXPOSED?$|_FORWARD$/i.test(String(rule.marker || '')) ||
+            !Number.isInteger(Number(rule.port)) || Number(rule.port) < 1 || Number(rule.port) > 65535)
+          return;
+        this.exposedPorts[Number(rule.port)] = String(rule.label || ('Port ' + rule.port));
+      });
 
-    // Use explicitly configured allow labels as useful defaults; the user can
-    // edit these independently in this browser's traffic-context settings.
-    this.exposedPorts = {};
-    this.policyRules.forEach(rule => {
-      if (!rule || !/_ALLOW$|_EXPOSED?$|_FORWARD$/i.test(String(rule.marker || '')) ||
-          !Number.isInteger(Number(rule.port)) || Number(rule.port) < 1 || Number(rule.port) > 65535)
-        return;
-      this.exposedPorts[Number(rule.port)] = String(rule.label || ('Port ' + rule.port));
-    });
-
-    try {
-      const saved = JSON.parse(localStorage.getItem('reffix-log-viewer.traffic-context') || 'null');
-      if (saved && typeof saved === 'object') {
-        if (saved.exposedPorts && typeof saved.exposedPorts === 'object')
+      try {
+        const saved = JSON.parse(localStorage.getItem('reffix-log-viewer.traffic-context') || 'null');
+        if (saved && typeof saved === 'object' && saved.exposedPorts && typeof saved.exposedPorts === 'object')
           this.exposedPorts = Object.fromEntries(Object.entries(saved.exposedPorts)
             .filter(([port, label]) => /^\d{1,5}$/.test(port) && Number(port) > 0 && Number(port) <= 65535 && typeof label === 'string')
             .map(([port, label]) => [Number(port), label.trim() || ('Port ' + port)]));
+        this.groupRepeated = localStorage.getItem('reffix-log-viewer.group-repeated') !== 'false';
       }
-      this.groupRepeated = localStorage.getItem('reffix-log-viewer.group-repeated') !== 'false';
+      catch (e) {}
     }
-    catch (e) {}
     const activeInterface = this.watchConfig && (this.watchConfig.active_interface ||
       (this.watchConfig.wan_interface !== 'auto' ? this.watchConfig.wan_interface : ''));
     if (activeInterface) this.wanInterfaces = [String(activeInterface).trim().toLowerCase()];
@@ -260,10 +317,13 @@ return view.extend({
         ['all', 'tcp', 'udp'].includes(p.proto) &&
         ['all', '5m', '15m', '1h', '6h', '24h'].includes(p.window)
       ).slice(0, 20) : [];
+      this.historyRetention = ['off', '1', '7', '30'].includes(localStorage.getItem('reffix-log-viewer.history-days'))
+        ? localStorage.getItem('reffix-log-viewer.history-days') : 'off';
     }
     catch (e) {
       this.showReputation = false;
       this.filterPresets = [];
+      this.historyRetention = 'off';
     }
   },
 
@@ -303,7 +363,7 @@ return view.extend({
     this.kind.value = this.kindFilter = preset.kind;
     this.proto.value = this.protoFilter = preset.proto;
     this.window.value = this.timeFilter = preset.window;
-    this.maxEntries = 500;
+    this.maxEntries = GROUP_PAGE_SIZE;
     this.renderRows();
     this.renderInsightsPanel();
   },
@@ -344,6 +404,222 @@ return view.extend({
     event.basePolicyLabel = event.policyLabel;
     event.basePolicyNote = event.policyNote;
     return event;
+  },
+
+  routerNowMs: function() {
+    return this.routerClockAtSync ? this.routerClockAtSync + (Date.now() - this.routerClockSyncedAt) : Date.now();
+  },
+
+  storeHistory: async function(events) {
+    if (this.historyRetention === 'off' || !events.length) return;
+    const db = await openHistoryDatabase();
+    const tx = db.transaction('events', 'readwrite');
+    const store = tx.objectStore('events');
+    const now = this.routerNowMs();
+    events.forEach(event => {
+      if (event.rawLine) store.put({
+        key: event.rawLine,
+        rawLine: event.rawLine,
+        timestampMs: event.timestampMs || now,
+        routerOffset: this.watchConfig && this.watchConfig.router_offset || ''
+      });
+    });
+    const cutoff = now - Number(this.historyRetention) * 86400000;
+    let kept = 0;
+    const cursorRequest = store.index('timestampMs').openCursor(null, 'prev');
+    cursorRequest.onsuccess = () => {
+      const cursor = cursorRequest.result;
+      if (!cursor) return;
+      if (cursor.value.timestampMs < cutoff || kept >= 10000) cursor.delete();
+      else kept++;
+      cursor.continue();
+    };
+    await historyTransactionDone(tx);
+  },
+
+  loadHistory: async function() {
+    if (this.historyRetention === 'off') return [];
+    const db = await openHistoryDatabase();
+    const tx = db.transaction('events', 'readonly');
+    const rows = await historyRequest(tx.objectStore('events').getAll());
+    const cutoff = this.routerNowMs() - Number(this.historyRetention) * 86400000;
+    return rows.filter(row => row.timestampMs >= cutoff).map((row, index) => {
+      const event = parseLine(row.rawLine, index + 1, row.routerOffset);
+      if (!event) return null;
+      event.timestampMs = row.timestampMs;
+      return this.applyTrafficContext(this.applyPolicy(event));
+    }).filter(Boolean);
+  },
+
+  clearLocalHistory: async function() {
+    const db = await openHistoryDatabase();
+    const tx = db.transaction('events', 'readwrite');
+    tx.objectStore('events').clear();
+    await historyTransactionDone(tx);
+    this.historyCache = new Map();
+    this.historySeedPending = false;
+    this.historyNeedsReload = true;
+    this.historyStatusText.textContent = _('Browser-local history cleared.');
+    this.historyRetentionSelect.value = this.historyRetention;
+    this.refreshEvents().catch(() => {});
+  },
+
+  renderWatchStatus: function() {
+    if (!this.watchStatusText) return;
+    const config = this.watchConfig;
+    if (!config) {
+      this.watchStatusText.textContent = _('WAN watch status unavailable · IPv4 only');
+      return;
+    }
+    const active = config.active_interface || _('WAN interface unresolved');
+    const count = String(config.ports || '').split(/[\s,]+/).filter(Boolean).length;
+    const state = config.enabled ? (config.installed ? _('active') : _('enabled · rules not detected')) : _('disabled');
+    const rate = config.log_rate ? ' · ' + config.log_rate : '';
+    this.watchStatusText.textContent = _('WAN watch ') + state + ' · IPv4 · ' + active + ' · ' + count + _(' ports') + rate;
+  },
+
+  exportSettings: async function() {
+    await this.loadWatchConfig();
+    const data = {
+      schema: 'reffix-firewall-log-settings', version: 1,
+      watcher: this.watchConfig ? {
+        enabled: this.watchConfig.enabled !== false,
+        wan_interface: this.watchConfig.wan_interface || 'auto',
+        ports: this.watchConfig.ports || ''
+      } : null,
+      browser: {
+        exposedPorts: this.exposedPorts,
+        filterPresets: this.filterPresets,
+        showReputation: this.showReputation,
+        groupRepeated: this.groupRepeated,
+        historyRetention: this.historyRetention,
+        insightsOpen: !!this.insightsDisclosure.open
+      }
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'}));
+    const link = E('a', {href: url, download: 'reffix-firewall-log-settings.json'});
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  },
+
+  importSettings: function(file) {
+    const reader = new FileReader();
+    reader.onerror = () => ui.addNotification(null, E('p', _('Could not read settings file.')), 'error');
+    reader.onload = () => {
+      let data;
+      try { data = JSON.parse(String(reader.result || '')); }
+      catch (e) { ui.addNotification(null, E('p', _('Settings file is not valid JSON.')), 'error'); return; }
+      if (!data || data.schema !== 'reffix-firewall-log-settings' || data.version !== 1 || !data.browser || typeof data.browser !== 'object') {
+        ui.addNotification(null, E('p', _('This is not a supported Firewall Log settings file.')), 'error'); return;
+      }
+      const browser = data.browser;
+      const exposedPorts = {};
+      if (browser.exposedPorts && typeof browser.exposedPorts === 'object' && !Array.isArray(browser.exposedPorts)) {
+        for (const [port, label] of Object.entries(browser.exposedPorts)) {
+          if (!/^\d{1,5}$/.test(port) || Number(port) < 1 || Number(port) > 65535 || typeof label !== 'string' || label.length > 60) {
+            ui.addNotification(null, E('p', _('Settings contain an invalid exposed port label.')), 'error'); return;
+          }
+          exposedPorts[port] = label.trim() || ('Port ' + port);
+        }
+      }
+      const presets = Array.isArray(browser.filterPresets) ? browser.filterPresets.filter(p =>
+        p && typeof p.name === 'string' && typeof p.query === 'string' &&
+        ['all', 'blocked', 'observed', 'allowed', 'exposed'].includes(p.kind) &&
+        ['all', 'tcp', 'udp'].includes(p.proto) && ['all', '5m', '15m', '1h', '6h', '24h'].includes(p.window)
+      ).slice(0, 20) : [];
+      const watcher = data.watcher;
+      if (watcher && (typeof watcher.enabled !== 'boolean' || typeof watcher.wan_interface !== 'string' ||
+          !/^(auto|[a-zA-Z0-9_.:-]{1,32})$/.test(watcher.wan_interface) || typeof watcher.ports !== 'string' ||
+          watcher.ports.length > 4096 || /[^0-9,\s]/.test(watcher.ports))) {
+        ui.addNotification(null, E('p', _('Settings contain invalid WAN watch configuration.')), 'error'); return;
+      }
+      const summary = E('ul', {}, [
+        E('li', {}, Object.keys(exposedPorts).length + _(' exposed-service labels')),
+        E('li', {}, presets.length + _(' saved filter presets')),
+        E('li', {}, watcher ? _('Router WAN watch settings will also be updated.') : _('Router WAN watch settings are not included.'))
+      ]);
+      ui.showModal(_('Review settings import'), [
+        E('p', {}, _('Review the settings before applying them. Router settings will be written to this router; browser preferences stay local to this browser.')),
+        summary
+      ], [
+        E('button', {class: 'cbi-button', click: ui.hideModal}, _('Cancel')),
+        E('button', {class: 'cbi-button cbi-button-action important', click: async () => {
+          try {
+            if (watcher) {
+              const raw = await fs.exec_direct('/usr/sbin/infra-port-watch-config', ['set', watcher.enabled ? '1' : '0', watcher.wan_interface, watcher.ports], 'text');
+              this.watchConfig = JSON.parse(raw || '{}');
+              this.watchConfigLoaded = true;
+            }
+          }
+          catch (e) { ui.addNotification(null, E('p', _('Router settings were not applied: ') + (e.message || e)), 'error'); return; }
+          this.exposedPorts = exposedPorts;
+          this.filterPresets = presets;
+          this.showReputation = browser.showReputation === true;
+          this.groupRepeated = browser.groupRepeated !== false;
+          this.historyRetention = ['off', '1', '7', '30'].includes(browser.historyRetention) ? browser.historyRetention : 'off';
+          try {
+            localStorage.setItem('reffix-log-viewer.traffic-context', JSON.stringify({exposedPorts}));
+            localStorage.setItem('reffix-log-viewer.filters', JSON.stringify(presets));
+            localStorage.setItem('reffix-log-viewer.external-reputation', String(this.showReputation));
+            localStorage.setItem('reffix-log-viewer.group-repeated', String(this.groupRepeated));
+            localStorage.setItem('reffix-log-viewer.history-days', this.historyRetention);
+            localStorage.setItem('reffix-log-viewer.insights-open', String(browser.insightsOpen === true));
+          }
+          catch (e) { ui.addNotification(null, E('p', _('Some browser settings could not be stored.')), 'warning'); }
+          ui.hideModal();
+          location.reload();
+        }}, _('Apply settings'))
+      ]);
+    };
+    reader.readAsText(file);
+  },
+
+  importFirewallForwards: async function() {
+    await this.loadWatchConfig(true);
+    const redirects = this.watchConfig && Array.isArray(this.watchConfig.redirects) ? this.watchConfig.redirects : [];
+    if (!redirects.length) {
+      ui.addNotification(null, E('p', _('No enabled IPv4 port forwards were found in the firewall configuration.')), 'info');
+      return;
+    }
+    const choices = redirects.map((item, index) => {
+      const portSpec = String(item.source_ports || '').trim();
+      const tokens = portSpec.split(/[\s,]+/).filter(Boolean);
+      const ports = [];
+      let valid = tokens.length > 0;
+      tokens.forEach(token => {
+        const match = token.match(/^(\d{1,5})(?:-(\d{1,5}))?$/);
+        if (!match) { valid = false; return; }
+        const from = Number(match[1]), to = Number(match[2] || match[1]);
+        if (!from || to < from || to > 65535 || ports.length + to - from + 1 > 256) { valid = false; return; }
+        for (let port = from; port <= to; port++) ports.push(port);
+      });
+      const check = E('input', {type: 'checkbox', disabled: !valid, checked: valid});
+      const protocol = item.protocol || 'tcp';
+      return {item, ports, check, label: E('label', {class: 'fw-settings-field'}, [check,
+        E('span', {}, (item.name || _('Unnamed forward')) + ' · ' + (item.source_zone || '?') + ' · ' + portSpec + '/' + protocol +
+          (item.destination_port ? ' → destination port ' + item.destination_port : ''))])};
+    });
+    ui.showModal(_('Review firewall forwards'), [
+      E('p', {class: 'cbi-section-descr'}, _('Select which WAN-forward destination ports should receive exposed-service labels. This imports labels only; it does not read LAN hostnames or change firewall rules. Verify each entry before importing.')),
+      ...choices.map(choice => choice.label)
+    ], [
+      E('button', {class: 'cbi-button', click: ui.hideModal}, _('Cancel')),
+      E('button', {class: 'cbi-button cbi-button-action important', click: () => {
+        const next = Object.assign({}, this.exposedPorts);
+        choices.filter(choice => choice.check.checked).forEach(({item, ports}) => {
+          const label = String(item.name || 'Exposed service').slice(0, 60);
+          ports.forEach(port => { next[Number(port)] = label; });
+        });
+        this.exposedPorts = next;
+        try { localStorage.setItem('reffix-log-viewer.traffic-context', JSON.stringify({exposedPorts: next})); }
+        catch (e) { ui.addNotification(null, E('p', _('Could not save labels in this browser.')), 'warning'); }
+        this.events.forEach(event => this.applyTrafficContext(event));
+        this.historyNeedsReload = true;
+        ui.hideModal();
+        this.renderRows();
+        this.renderInsightsPanel();
+      }}, _('Import selected labels'))
+    ]);
   },
 
   parseTrafficContext: function(interfacesText, portsText) {
@@ -398,6 +674,7 @@ return view.extend({
           try { localStorage.setItem('reffix-log-viewer.traffic-context', JSON.stringify({exposedPorts: config.ports})); }
           catch (e) { ui.addNotification(null, E('p', _('Could not save settings in this browser.')), 'warning'); }
           this.events.forEach(event => this.applyTrafficContext(event));
+          this.historyNeedsReload = true;
           ui.hideModal();
           this.renderRows();
           this.renderInsightsPanel();
@@ -424,13 +701,17 @@ return view.extend({
     events.forEach(e => {
       if (e.source) {
         if (!sources.has(e.source))
-          sources.set(e.source, { source: e.source, count: 0, ports: new Set(), last: e.timestamp });
+          sources.set(e.source, { source: e.source, count: 0, ports: new Set(), firstMs: e.timestampMs, lastMs: e.timestampMs, first: e.timestamp, last: e.timestamp });
         const s = sources.get(e.source);
         s.count++;
         if (e.dport) s.ports.add(e.dport);
         if (e.timestampMs && (!s.lastMs || e.timestampMs > s.lastMs)) {
           s.lastMs = e.timestampMs;
           s.last = e.timestamp;
+        }
+        if (e.timestampMs && (!s.firstMs || e.timestampMs < s.firstMs)) {
+          s.firstMs = e.timestampMs;
+          s.first = e.timestamp;
         }
       }
 
@@ -465,8 +746,10 @@ return view.extend({
       const label = geo.country_name || 'GeoIP pending';
       const countryCode = (geo.country_code || '').toUpperCase();
       const asn = geo.asn_organization ? ' · ' + geo.asn_organization : '';
+      const firstSeen = item.firstMs ? new Date(item.firstMs).toLocaleString() : item.first;
+      const lastSeen = item.lastMs ? new Date(item.lastMs).toLocaleString() : item.last;
       return '<li><button type="button" class="fw-insight-filter" data-source-filter="' + esc(item.source) + '"><span class="fw-insight-ip"><span class="fw-flag" title="' + esc(label) + '">' + countryFlag(countryCode) + '</span><code>' + esc(item.source) + '</code></span><span>' + item.count + ' events</span>' +
-        '<small>' + esc(label + asn) + ' · ' + item.ports.size + ' ports</small></button></li>';
+        '<small>' + esc(label + asn) + ' · ' + item.ports.size + ' ports</small><small>First ' + esc(firstSeen) + ' · Last ' + esc(lastSeen) + '</small></button></li>';
     }, 'No sources in this window.');
 
     const sortedPorts = [...ports.values()].sort((a, b) => b.count - a.count || a.port - b.port);
@@ -480,6 +763,29 @@ return view.extend({
       '<li><strong>' + esc(item.name) + '</strong><span>' + item.count + ' events</span>' +
       '<small>' + item.sources.size + ' source IPs · based on local GeoIP matches</small></li>',
       'No ASN data yet. GeoIP enrichment currently checks up to 60 unique recent sources.');
+
+    const timelineEvents = events.filter(event => Number.isFinite(event.timestampMs));
+    const latestTime = this.routerNowMs();
+    const earliestTime = timelineEvents.length ? Math.min(...timelineEvents.map(event => event.timestampMs)) : latestTime;
+    const span = this.getTimeWindowMs() || Math.max(60000, latestTime - earliestTime + 30000);
+    const bucketMs = Math.max(30000, Math.ceil(span / 24 / 30000) * 30000);
+    const timelineEnd = Math.ceil(latestTime / bucketMs) * bucketMs;
+    const timelineStart = timelineEnd - bucketMs * 24;
+    const buckets = Array.from({length:24}, () => 0);
+    timelineEvents.forEach(event => {
+      const index = Math.floor((event.timestampMs - timelineStart) / bucketMs);
+      if (index >= 0 && index < buckets.length) buckets[index]++;
+    });
+    const maxBucket = Math.max(1, ...buckets);
+    const timelineHtml = '<div class="fw-timeline" role="group" aria-label="' + esc(_('Firewall events by time; select a bar to filter')) + '">' +
+      buckets.map((count, index) => {
+        const start = timelineStart + index * bucketMs;
+        const end = start + bucketMs;
+        const label = new Date(start).toLocaleString() + ' · ' + count + _(' events');
+        const selected = this.timelineRange && this.timelineRange.start === start ? ' aria-pressed="true"' : ' aria-pressed="false"';
+        const height = Math.max(count ? 7 : 2, Math.round(count / maxBucket * 100));
+        return '<button type="button" class="fw-timeline-bin' + (count ? '' : ' empty') + '" style="--fw-bar-height:' + height + '%" data-timeline-start="' + start + '" data-timeline-end="' + end + '" title="' + esc(label) + '" aria-label="' + esc(label) + '"' + selected + '><span>' + (count || '') + '</span></button>';
+      }).join('') + '</div><div class="fw-timeline-labels"><span>' + esc(new Date(timelineStart).toLocaleTimeString()) + '</span><span>' + esc(new Date(timelineEnd).toLocaleTimeString()) + '</span></div>';
 
     const scanMap = new Map();
     events.forEach(e => {
@@ -518,7 +824,9 @@ return view.extend({
     const policyNotes = this.policyRules.length
       ? 'Local policy labels active: ' + this.policyRules.length
       : 'Optional policy labels: copy the example config to /etc/log-viewer/policies.json and edit it for your rules.';
-    return '<div class="fw-insight"><h3>Top sources</h3>' + topSources + '</div>' +
+    return '<div class="fw-insight fw-insight-timeline"><h3>Activity timeline</h3>' + timelineHtml +
+        (this.timelineRange ? '<button type="button" class="cbi-button fw-clear-timeline">' + _('Clear timeline filter') + '</button>' : '<p class="fw-muted">' + _('Select a time bar to filter the event table.') + '</p>') + '</div>' +
+      '<div class="fw-insight"><h3>Top sources</h3>' + topSources + '</div>' +
       '<div class="fw-insight"><h3>Destination ports <small>(' + sortedPorts.length + ' total)</small></h3>' + topPorts +
         (sortedPorts.length > 5 ? '<button type="button" class="cbi-button fw-show-all-ports">' + (this.showAllPorts ? _('Show top five') : _('Show all ports')) + '</button>' : '') + '</div>' +
       '<div class="fw-insight"><h3>Top ASNs</h3>' + topAsns + '</div>' +
@@ -534,18 +842,26 @@ return view.extend({
     if (Object.prototype.hasOwnProperty.call(this.geoCache, ip) &&
         (Object.keys(this.geoCache[ip]).length || Date.now() - (this.geoCacheAt[ip] || 0) < 5 * 60 * 1000))
       return this.geoCache[ip];
-    try {
-      const raw = await fs.exec_direct('/usr/bin/flint4-geoip', ['--json', ip], 'text');
-      const data = JSON.parse(raw || '{}');
-      this.geoCache[ip] = data.error ? {} : data;
-      this.geoCacheAt[ip] = Date.now();
-      return data;
-    }
-    catch (e) {
-      this.geoCache[ip] = {};
-      this.geoCacheAt[ip] = Date.now();
-      return {};
-    }
+    if (this.geoLookupInFlight.has(ip)) return this.geoLookupInFlight.get(ip);
+    const lookup = (async () => {
+      try {
+        const raw = await fs.exec_direct('/usr/bin/flint4-geoip', ['--json', ip], 'text');
+        const data = JSON.parse(raw || '{}');
+        this.geoCache[ip] = data.error ? {} : data;
+        this.geoCacheAt[ip] = Date.now();
+        return this.geoCache[ip];
+      }
+      catch (e) {
+        this.geoCache[ip] = {};
+        this.geoCacheAt[ip] = Date.now();
+        return {};
+      }
+      finally {
+        this.geoLookupInFlight.delete(ip);
+      }
+    })();
+    this.geoLookupInFlight.set(ip, lookup);
+    return lookup;
   },
 
   enrich: async function(events) {
@@ -557,7 +873,7 @@ return view.extend({
   refreshEvents: async function() {
     const generation = ++this.refreshGeneration;
     await this.loadPolicyRules();
-    await this.loadWatchConfig();
+    await this.loadWatchConfig(true);
     this.loadTrafficContext();
     const raw = await this.getLogData();
     if (generation !== this.refreshGeneration) return;
@@ -568,14 +884,54 @@ return view.extend({
     if (changed) {
       this.lastRawData = text;
       const lines = text.trim() ? text.trim().split('\n') : [];
-      this.events = lines.map((line, i) => parseLine(line, i + 1))
+      this.liveEvents = lines.map((line, i) => parseLine(line, i + 1, this.watchConfig && this.watchConfig.router_offset))
         .filter(Boolean).map(e => this.applyTrafficContext(this.applyPolicy(e))).slice(-MAX_LINES).reverse();
+      const previousKeys = this.liveEventKeys || new Set();
+      this.newLiveEvents = this.liveEvents.filter(event => !previousKeys.has(event.rawLine));
+      this.liveEventKeys = new Set(this.liveEvents.map(event => event.rawLine));
+      this.historyNeedsReload = true;
     }
+    this.liveEvents.forEach(event => this.applyTrafficContext(event));
+    if (this.historyRetention !== 'off' && (changed || this.historyNeedsReload)) {
+      try {
+        const historyDelta = changed ? this.newLiveEvents : (this.historySeedPending ? this.liveEvents : []);
+        await this.storeHistory(historyDelta);
+        this.historySeedPending = false;
+        if (!this.historyCache || this.historyNeedsReload) {
+          const historical = await this.loadHistory();
+          this.historyCache = new Map(historical.map(event => [event.rawLine, event]));
+        }
+        else if (changed) {
+          this.newLiveEvents.forEach(event => this.historyCache.set(event.rawLine, event));
+        }
+        const cutoff = this.routerNowMs() - Number(this.historyRetention) * 86400000;
+        const historical = [...this.historyCache.values()]
+          .filter(event => event.timestampMs >= cutoff)
+          .sort((a, b) => (b.timestampMs || 0) - (a.timestampMs || 0))
+          .slice(0, 10000);
+        this.historyCache = new Map(historical.map(event => [event.rawLine, event]));
+        const merged = new Map();
+        historical.concat(this.liveEvents).forEach((event, index) => {
+          event.id = index + 1;
+          merged.set(event.rawLine, event);
+        });
+        this.events = [...merged.values()].sort((a, b) => (b.timestampMs || 0) - (a.timestampMs || 0)).slice(0, 10000);
+        this.historyStatusText.textContent = _('Browser-local history: ') + this.historyCache.size + _(' stored events · max 10,000');
+        this.historyNeedsReload = false;
+      }
+      catch (error) {
+        this.events = this.liveEvents;
+        this.historyStatusText.textContent = _('Browser-local history unavailable: ') + (error.message || error);
+      }
+    }
+    else this.events = this.liveEvents;
+    if (this.historyRetention === 'off') this.historyStatusText.textContent = _('Browser-local history is off · router buffer only');
     this.statusText.textContent = this.paused
       ? _('Auto-refresh paused · manually refreshed at ') + (new Date()).toLocaleTimeString()
       : _('Live · updated ') + (new Date()).toLocaleTimeString();
     this.logStatus.textContent = _('Read ') + this.sourceLineCount + _(' of up to ') + MAX_LINES +
-      _(' recent log lines · collected ') + new Date(this.lastCollectedAt).toLocaleString();
+      _(' most recent source lines · source limit · collected ') + new Date(this.lastCollectedAt).toLocaleString();
+    this.renderWatchStatus();
     if (changed) {
       this.renderRows();
       this.renderInsightsPanel();
@@ -603,8 +959,15 @@ return view.extend({
   },
 
   getWindowedEvents: function() {
+    let events = this.getTimeFilteredEvents();
+    if (this.timelineRange)
+      events = events.filter(event => event.timestampMs >= this.timelineRange.start && event.timestampMs < this.timelineRange.end);
+    return events;
+  },
+
+  getTimeFilteredEvents: function() {
     const windowMs = this.getTimeWindowMs();
-    const now = Date.now();
+    const now = this.routerNowMs();
     return this.events.filter(e => {
       if (!windowMs || !e.timestampMs) return true;
       const age = now - e.timestampMs;
@@ -666,7 +1029,7 @@ return view.extend({
   },
 
   renderInsightsPanel: function() {
-    if (this.insights) this.insights.innerHTML = this.renderInsights(this.getWindowedEvents());
+    if (this.insights) this.insights.innerHTML = this.renderInsights(this.getTimeFilteredEvents());
   },
 
   renderGeoStatus: function() {
@@ -713,16 +1076,23 @@ return view.extend({
     this.tbody.innerHTML = visibleGroups.map(group => {
       const newest = group.events[0];
       const more = group.events.length - 1;
-      const header = more ? '<tr class="fw-group-row"><td colspan="8"><button type="button" class="fw-group-toggle" data-group-key="' + esc(group.key) + '">' +
+      const expanded = this.expandedProbeGroups.has(group.key);
+      const header = more ? '<tr class="fw-group-row"><td colspan="8"><button type="button" class="fw-group-toggle" aria-expanded="' + expanded + '" data-group-key="' + esc(group.key) + '">' +
         (this.expandedProbeGroups.has(group.key) ? '▾' : '▸') + ' ' + esc(newest.source) + ' → ' + esc(newest.destination) + ':' + esc(newest.dport) + '/' + esc(newest.protocol) +
         ' · ' + group.events.length + ' hits · ' + esc(newest.timestamp) + '</button></td></tr>' : '';
       if (!more) return this.renderEventRow(newest, 0);
-      return header + (this.expandedProbeGroups.has(group.key) ? group.events.map(e => this.renderEventRow(e, 0)).join('') : this.renderEventRow(newest, more));
+      if (!expanded) return header + this.renderEventRow(newest, more);
+      const limit = Math.min(group.events.length, this.expandedGroupLimits.get(group.key) || ROW_PAGE_SIZE);
+      const shown = group.events.slice(0, limit).map(event => this.renderEventRow(event, 0)).join('');
+      const loadRows = limit < group.events.length
+        ? '<tr class="fw-group-more"><td colspan="8"><button type="button" class="cbi-button fw-group-load-more" data-group-key="' + esc(group.key) + '">' +
+          _('Load next ') + ROW_PAGE_SIZE + _(' hits · ') + (group.events.length - limit) + _(' remaining') + '</button></td></tr>' : '';
+      return header + shown + loadRows;
     }).join('') || '<tr><td colspan="8" class="center">No matching firewall events in the selected window.</td></tr>';
     this.counter.textContent = (this.groupRepeated ? visibleGroups.length + ' groups shown · ' : events.length + ' shown · ') +
       matching.length + ' events matched · ' + windowed.length + ' in window · ' + this.events.length + ' loaded';
     this.loadMoreButton.hidden = visibleGroups.length >= groups.length;
-    this.loadMoreButton.textContent = _('Load 500 more groups') + ' · ' + (groups.length - visibleGroups.length) + _(' remaining');
+    this.loadMoreButton.textContent = _('Load ') + GROUP_PAGE_SIZE + _(' more groups') + ' · ' + (groups.length - visibleGroups.length) + _(' remaining');
   },
 
   render: function() {
@@ -913,6 +1283,13 @@ return view.extend({
       .fw-shell .fw-group-option input { margin: 0; }
       .fw-shell .fw-insight-port { grid-column: 1 / -1 !important; }
       .fw-shell .fw-insights-disclosure > summary { cursor: pointer; font-weight: 800; padding: 8px 2px; }
+      .fw-shell .fw-timeline { height: 96px; display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); align-items: end; gap: 3px; margin: 12px 0 4px; }
+      .fw-shell .fw-timeline-bin { min-width: 0; height: var(--fw-bar-height); min-height: 4px; padding: 0; color: var(--mp-bg); background: var(--mp-cyan); border: 1px solid transparent; border-radius: 3px 3px 0 0; cursor: pointer; }
+      .fw-shell .fw-timeline-bin.empty { background: var(--mp-surface); border-color: var(--mp-border); }
+      .fw-shell .fw-timeline-bin[aria-pressed="true"] { background: var(--mp-yellow); border-color: var(--mp-fg); }
+      .fw-shell .fw-timeline-bin span { display: block; overflow: hidden; color: var(--mp-bg); font-size: 9px; line-height: 1; }
+      .fw-shell .fw-timeline-labels { display: flex; justify-content: space-between; color: var(--mp-muted); font-size: 11px; }
+      .fw-shell .fw-insight-timeline { grid-column: 1 / -1; }
       .fw-shell .fw-settings-field { display: grid; gap: 6px; margin: 12px 0; font-weight: 700; }
       .fw-shell .fw-watch-toggle { display: flex; align-items: center; gap: 8px; }
       .fw-shell .fw-settings-field textarea { resize: vertical; }
@@ -959,6 +1336,11 @@ return view.extend({
       }
       .fw-shell .fw-insight-policy { grid-column: 1 / -1; }
       .fw-shell .fw-status-row { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--mp-muted); font-size: 12px; }
+      .fw-shell .fw-file-import { position: relative; display: inline-flex; align-items: center; min-height: 38px; padding: 7px 12px; color: var(--mp-fg); background: var(--mp-hover); border: 1px solid #625B65; border-radius: 7px; cursor: pointer; }
+      .fw-shell .fw-file-import input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+      .fw-shell .fw-file-import:focus-within { outline: 2px solid var(--mp-purple); outline-offset: 2px; }
+      .fw-shell .fw-history-toolbar { align-items: center; }
+      .fw-shell .fw-history-control { display: inline-flex; align-items: center; gap: 8px; }
       .fw-shell .fw-privacy { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0; color: var(--mp-muted); font-size: 12px; }
       .fw-shell .fw-privacy input { margin-top: 3px; }
       .fw-shell .fw-load-more { display: block; width: 100%; margin-top: 10px; }
@@ -1100,9 +1482,7 @@ return view.extend({
       .fw-shell .fw-flag { display: inline-flex; min-width: 22px; height: 16px; margin-right: 4px; align-items: center; justify-content: center; vertical-align: middle; }
       .fw-shell .fw-flag-img { display: block; width: 20px; max-height: 15px; height: auto; object-fit: contain; border: 1px solid #514D52; border-radius: 2px; }
       .fw-shell .fw-flag-fallback { font-size: 1.1em; line-height: 1; }
-      .fw-shell .fw-copy-ip:focus-visible,
-      .fw-shell .fw-toolbar button:focus-visible,
-      .fw-shell a:focus-visible {
+      .fw-shell :focus-visible {
         outline: 2px solid var(--mp-purple) !important;
         outline-offset: 2px;
       }
@@ -1120,20 +1500,20 @@ return view.extend({
     `));
 
     this.stats = E('div', {class: 'fw-stats'});
-    this.search = E('input', {class: 'cbi-input-text', type: 'search', placeholder: _('Search IP, country, ASN, port or service…')});
-    this.kind = E('select', {class: 'cbi-input-select'}, [
+    this.search = E('input', {class: 'cbi-input-text', type: 'search', placeholder: _('Search IP, country, ASN, port or service…'), 'aria-label': _('Search firewall events')});
+    this.kind = E('select', {class: 'cbi-input-select', 'aria-label': _('Filter by verdict')}, [
       E('option', {value: 'all'}, _('All verdict types')),
       E('option', {value: 'blocked'}, _('Blocked only')),
       E('option', {value: 'exposed'}, _('Exposed service hits')),
       E('option', {value: 'observed'}, _('Other interface / unclassified')),
       E('option', {value: 'allowed'}, _('Allowed · explicit logs only'))
     ]);
-    this.proto = E('select', {class: 'cbi-input-select'}, [
+    this.proto = E('select', {class: 'cbi-input-select', 'aria-label': _('Filter by protocol')}, [
       E('option', {value: 'all'}, _('All protocols')),
       E('option', {value: 'tcp'}, 'TCP'),
       E('option', {value: 'udp'}, 'UDP')
     ]);
-    this.window = E('select', {class: 'cbi-input-select', title: _('Filter events by log timestamp')}, [
+    this.window = E('select', {class: 'cbi-input-select', title: _('Filter events by log timestamp'), 'aria-label': _('Filter by time window')}, [
       E('option', {value: 'all'}, _('All loaded')),
       E('option', {value: '5m'}, _('Last 5 minutes')),
       E('option', {value: '15m'}, _('Last 15 minutes')),
@@ -1141,12 +1521,21 @@ return view.extend({
       E('option', {value: '6h'}, _('Last 6 hours')),
       E('option', {value: '24h'}, _('Last 24 hours'))
     ]);
-    this.presets = E('select', {class: 'cbi-input-select', title: _('Browser-local saved filter presets')});
+    this.presets = E('select', {class: 'cbi-input-select', title: _('Browser-local saved filter presets'), 'aria-label': _('Saved filter presets')});
     this.renderPresetOptions();
     this.counter = E('span', {class: 'right'});
     this.statusText = E('span', {class: 'fw-muted'});
     this.logStatus = E('span', {class: 'fw-muted'});
     this.geoStatusText = E('span', {class: 'fw-muted'});
+    this.watchStatusText = E('span', {class: 'fw-muted'});
+    this.historyStatusText = E('span', {class: 'fw-muted'});
+    this.historyRetentionSelect = E('select', {class: 'cbi-input-select', 'aria-label': _('Browser-local history retention')}, [
+      E('option', {value: 'off'}, _('Live buffer only')),
+      E('option', {value: '1'}, _('Keep 24 hours locally')),
+      E('option', {value: '7'}, _('Keep 7 days locally')),
+      E('option', {value: '30'}, _('Keep 30 days locally'))
+    ]);
+    this.historyRetentionSelect.value = this.historyRetention;
     this.reputationCheckbox = E('input', {type: 'checkbox', change: ev => {
         this.showReputation = ev.target.checked;
         try { localStorage.setItem('reffix-log-viewer.external-reputation', String(this.showReputation)); } catch (e) {}
@@ -1158,9 +1547,9 @@ return view.extend({
       E('span', {}, _('Show AbuseIPDB links (opening one shares its source IP with that service)'))
     ]);
     this.loadMoreButton = E('button', {class: 'cbi-button fw-load-more', hidden: true, click: () => {
-      this.maxEntries += 500;
+      this.maxEntries += GROUP_PAGE_SIZE;
       this.renderRows();
-    }}, _('Load 500 more'));
+    }}, _('Load ') + GROUP_PAGE_SIZE + _(' more'));
     this.pauseButton = E('button', {class: 'cbi-button', click: () => {
       this.paused = !this.paused;
       this.pauseButton.textContent = this.paused ? _('Resume live') : _('Pause live');
@@ -1194,19 +1583,31 @@ return view.extend({
         E('button', {class: 'cbi-button', click: () => this.exportCSV(false)}, _('Export filtered CSV')),
         E('button', {class: 'cbi-button', click: () => this.exportCSV(true)}, _('Export all loaded')),
         E('button', {class: 'cbi-button', click: () => this.openTrafficSettings()}, _('WAN / exposed ports')),
+        E('button', {class: 'cbi-button', click: () => this.importFirewallForwards()}, _('Import firewall forwards')),
+        E('button', {class: 'cbi-button', click: () => this.exportSettings()}, _('Export settings')),
+        E('label', {class: 'fw-file-import'}, [E('span', {}, _('Import settings')), this.settingsFile = E('input', {type: 'file', accept: 'application/json,.json', 'aria-label': _('Import Firewall Log settings file'), change: ev => {
+          const file = ev.target.files && ev.target.files[0];
+          if (file) this.importSettings(file);
+          ev.target.value = '';
+        }})]),
         E('label', {class: 'fw-group-option'}, [this.groupCheckbox = E('input', {type: 'checkbox', checked: this.groupRepeated, change: ev => {
           this.groupRepeated = ev.target.checked;
           try { localStorage.setItem('reffix-log-viewer.group-repeated', String(this.groupRepeated)); } catch (e) {}
-          this.maxEntries = 500;
+          this.maxEntries = GROUP_PAGE_SIZE;
           this.renderRows();
         }}), E('span', {}, _('Group repeated probes'))]),
         E('button', {class: 'cbi-button', click: () => {
-          this.sourceFilter = ''; this.portFilter = null; this.renderRows();
+          this.sourceFilter = ''; this.portFilter = null; this.timelineRange = null; this.renderRows(); this.renderInsightsPanel();
         }}, _('Clear source / port filter')),
         this.counter,
         this.statusText
       ]),
-      E('div', {class: 'fw-status-row'}, [this.logStatus, this.geoStatusText]),
+      E('div', {class: 'fw-toolbar fw-history-toolbar'}, [
+        E('label', {class: 'fw-history-control'}, [E('span', {}, _('Browser-local history')), this.historyRetentionSelect]),
+        E('button', {class: 'cbi-button', click: () => this.clearLocalHistory().catch(e => ui.addNotification(null, E('p', e.message), 'error'))}, _('Clear local history')),
+        E('span', {class: 'fw-muted'}, _('Stored in this browser only · max 10,000 events'))
+      ]),
+      E('div', {class: 'fw-status-row'}, [this.logStatus, this.watchStatusText, this.geoStatusText, this.historyStatusText]),
       this.reputationToggle,
       this.insightsDisclosure,
       E('div', {class: 'fw-tablewrap'}, table),
@@ -1217,8 +1618,21 @@ return view.extend({
       const groupButton = ev.target.closest('.fw-group-toggle');
       if (groupButton) {
         const key = groupButton.getAttribute('data-group-key');
-        if (this.expandedProbeGroups.has(key)) this.expandedProbeGroups.delete(key);
-        else this.expandedProbeGroups.add(key);
+        if (this.expandedProbeGroups.has(key)) {
+          this.expandedProbeGroups.delete(key);
+          this.expandedGroupLimits.delete(key);
+        }
+        else {
+          this.expandedProbeGroups.add(key);
+          this.expandedGroupLimits.set(key, ROW_PAGE_SIZE);
+        }
+        this.renderRows();
+        return;
+      }
+      const groupMore = ev.target.closest('.fw-group-load-more');
+      if (groupMore) {
+        const key = groupMore.getAttribute('data-group-key');
+        this.expandedGroupLimits.set(key, (this.expandedGroupLimits.get(key) || ROW_PAGE_SIZE) + ROW_PAGE_SIZE);
         this.renderRows();
         return;
       }
@@ -1242,6 +1656,22 @@ return view.extend({
       }
     });
     this.insights.addEventListener('click', ev => {
+      const timelineButton = ev.target.closest('.fw-timeline-bin');
+      if (timelineButton) {
+        const start = Number(timelineButton.getAttribute('data-timeline-start'));
+        this.timelineRange = {start, end: Number(timelineButton.getAttribute('data-timeline-end'))};
+        this.maxEntries = GROUP_PAGE_SIZE;
+        this.renderRows();
+        this.renderInsightsPanel();
+        return;
+      }
+      if (ev.target.closest('.fw-clear-timeline')) {
+        this.timelineRange = null;
+        this.maxEntries = GROUP_PAGE_SIZE;
+        this.renderRows();
+        this.renderInsightsPanel();
+        return;
+      }
       const portButton = ev.target.closest('.fw-insight-port');
       const sourceButton = ev.target.closest('.fw-insight-filter');
       if (portButton) {
@@ -1260,7 +1690,7 @@ return view.extend({
         return;
       }
       this.search.value = '';
-      this.maxEntries = 500;
+      this.maxEntries = GROUP_PAGE_SIZE;
       this.renderRows();
       this.insightsDisclosure.open = false;
     });
@@ -1270,19 +1700,29 @@ return view.extend({
     this.search.addEventListener('input', () => {
       clearTimeout(this.searchTimer);
       this.searchTimer = setTimeout(() => {
-        this.maxEntries = 500;
+        this.maxEntries = GROUP_PAGE_SIZE;
         this.renderRows();
       }, 120);
     });
-    this.kind.addEventListener('change', () => { this.kindFilter = this.kind.value; this.maxEntries = 500; this.renderRows(); });
-    this.proto.addEventListener('change', () => { this.protoFilter = this.proto.value; this.maxEntries = 500; this.renderRows(); });
+    this.kind.addEventListener('change', () => { this.kindFilter = this.kind.value; this.maxEntries = GROUP_PAGE_SIZE; this.renderRows(); });
+    this.proto.addEventListener('change', () => { this.protoFilter = this.proto.value; this.maxEntries = GROUP_PAGE_SIZE; this.renderRows(); });
     this.window.addEventListener('change', () => {
       this.timeFilter = this.window.value;
-      this.maxEntries = 500;
+      this.timelineRange = null;
+      this.maxEntries = GROUP_PAGE_SIZE;
       this.renderRows();
       this.renderInsightsPanel();
     });
     this.presets.addEventListener('change', () => this.applyFilterPreset(this.presets.value));
+    this.historyRetentionSelect.addEventListener('change', () => {
+      const wasDisabled = this.historyRetention === 'off';
+      this.historyRetention = this.historyRetentionSelect.value;
+      this.historyNeedsReload = true;
+      this.historySeedPending = wasDisabled && this.historyRetention !== 'off';
+      try { localStorage.setItem('reffix-log-viewer.history-days', this.historyRetention); }
+      catch (e) { this.historyStatusText.textContent = _('Browser storage is unavailable.'); }
+      this.refreshEvents().catch(e => { this.historyStatusText.textContent = _('History update failed: ') + (e.message || e); });
+    });
     this.statusText.textContent = _('Auto-refresh every 15s');
     this.refreshEvents().catch(e => ui.addNotification(null, E('p', _('Unable to load firewall events: ') + e.message), 'error'));
     this.timer = setInterval(() => {
