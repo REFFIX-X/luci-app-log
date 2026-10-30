@@ -151,7 +151,9 @@ print_config() {
 	json_add_string address_family 'IPv4 only'
 	json_add_string log_rate '10 per minute after burst of 20'
 	json_add_array redirects
-	config_load firewall
+	# A missing firewall config must not hide WAN watch status.
+	CONFIG_SECTIONS="${CONFIG_SECTIONS:-}"
+	config_load firewall || true
 	config_foreach add_redirect redirect
 	json_close_array
 	json_dump

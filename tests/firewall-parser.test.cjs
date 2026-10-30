@@ -16,6 +16,11 @@ const parser = new Function(
   source.slice(fieldsStart, lineEnd) + '\nreturn parseLine;'
 )();
 
+const timeFns = new Function(
+  source.slice(source.indexOf('function parseRouterTimestamp'), source.indexOf('function parseLine')) +
+  '\nreturn { parseRouterTimestamp, formatLogreadTimestamp };'
+)();
+
 test('classifies explicit blocked events and retains original packet data', () => {
   const event = parser('Oct 12 12:00:00 2026 router kernel: FIREWALL_BLOCK: IN=wan SRC=198.51.100.25 DST=192.0.2.1 PROTO=TCP SPT=41234 DPT=22 TTL=51 SYN', 1);
   assert.equal(event.kind, 'Blocked');
@@ -34,6 +39,18 @@ test('classifies only explicit allow markers as allowed', () => {
   const event = parser('Oct 12 12:00:02 2026 router kernel: FIREWALL_ALLOW: IN=wan SRC=203.0.113.9 DST=192.0.2.1 PROTO=TCP SPT=4567 DPT=443', 3);
   assert.equal(event.kind, 'Allowed');
   assert.equal(parser('Oct 12 12:00:03 2026 router kernel: IN=wan SRC=203.0.113.9 DST=192.0.2.1 PROTO=TCP DPT=443', 4), null);
+});
+
+test('router timestamps round-trip through the logread wall clock', () => {
+  const epoch = Date.UTC(2026, 9, 30, 17, 25, 1);
+  const stamp = timeFns.formatLogreadTimestamp(epoch, '+0200');
+  assert.equal(stamp, 'Fri Oct 30 19:25:01 2026');
+  assert.equal(timeFns.parseRouterTimestamp(stamp, '+0200'), epoch);
+  const west = timeFns.formatLogreadTimestamp(epoch, '-0700');
+  assert.equal(west, 'Fri Oct 30 10:25:01 2026');
+  assert.equal(timeFns.parseRouterTimestamp(west, '-0700'), epoch);
+  assert.equal(timeFns.formatLogreadTimestamp(epoch, ''), '');
+  assert.equal(timeFns.formatLogreadTimestamp(0, '+0000'), '');
 });
 
 test('parses quoted fields without changing verdict semantics', () => {

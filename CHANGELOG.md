@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Grant LuCI exec access to `/usr/sbin/infra-port-watch-config` itself. An ACL entry of `infra-port-watch-config set` does not match the real command line, which also carries the interface and port list, and rpcd rejects argument strings longer than 1024 bytes before the pattern is tested. Saving WAN watch settings from the page failed with access denied.
+- Read log lines from ubus `log.read`, then fall back to `logread` including `/usr/libexec/logread-ubox`. OpenWrt 25.12 installs logread at that path, and LuCI `file.exec` keeps only about 256 KiB, so a 1,500-line `logread` tail could drop the newest events.
+- Re-apply the WAN watch when interface `wan` comes up, so a boot before PPPoE or DHCP has a device still installs the log rule.
+- Keep `infra-port-watch get` working when `/etc/config/firewall` is missing, instead of exiting before it prints status JSON.
+- Restart `rpcd` and clear the LuCI menu cache from the package postinst. Copy country flags, the policy example, and the WAN hotplug hook from `install.sh`.
+- Download CSV and settings exports by clicking a link attached to the document, so browsers that ignore detached anchors still save the file.
+- Depend on `luci-base` and `logd`.
+
 ## v3.1.1
 
 - Fixes WAN watcher startup on OpenWrt 25.12 when `IPKG_INSTROOT` is unset during package post-upgrade.

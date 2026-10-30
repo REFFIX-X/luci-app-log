@@ -33,6 +33,18 @@ test('watcher initializes OpenWrt package install context before sourcing system
   assert.match(watcher, /IPKG_INSTROOT="\$\{IPKG_INSTROOT:-\}"[\s\S]*?\. \/lib\/functions\.sh/);
 });
 
+test('WAN hotplug reapplies the watch after interface wan comes up', () => {
+  const hotplug = fs.readFileSync(path.join(root, 'root/etc/hotplug.d/iface/99-infra-port-watch'), 'utf8');
+  assert.match(hotplug, /\[ "\$\{ACTION:-\}" = ifup \]/);
+  assert.match(hotplug, /\[ "\$\{INTERFACE:-\}" = wan \]/);
+  assert.match(hotplug, /\/etc\/init\.d\/infra-port-watch restart/);
+});
+
+test('status JSON still prints when the firewall config cannot be loaded', () => {
+  assert.match(watcher, /config_load firewall \|\| true/);
+  assert.match(watcher, /CONFIG_SECTIONS="\$\{CONFIG_SECTIONS:-\}"/);
+});
+
 test('UI writer validates configurable WAN device and port list before committing UCI', () => {
   assert.match(writer, /invalid WAN interface/);
   assert.match(writer, /port out of range/);

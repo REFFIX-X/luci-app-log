@@ -28,6 +28,7 @@ jobs:
           sh -n root/usr/sbin/infra-port-watch-config
           sh -n root/etc/init.d/infra-port-watch
           sh -n root/etc/infra-port-watch.sh
+          sh -n root/etc/hotplug.d/iface/99-infra-port-watch
       - name: JSON syntax
         run: |
           python3 -m json.tool root/usr/share/luci/menu.d/luci-app-log-viewer.json >/dev/null
