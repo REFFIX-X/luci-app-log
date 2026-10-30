@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v3.1.3 (2026-10-30)
 
 - Grant LuCI exec access to `/usr/sbin/infra-port-watch-config` itself. An ACL entry of `infra-port-watch-config set` does not match the real command line, which also carries the interface and port list, and rpcd rejects argument strings longer than 1024 bytes before the pattern is tested. Saving WAN watch settings from the page failed with access denied.
 - Read log lines from ubus `log.read`, then fall back to `logread` including `/usr/libexec/logread-ubox`. OpenWrt 25.12 installs logread at that path, and LuCI `file.exec` keeps only about 256 KiB, so a 1,500-line `logread` tail could drop the newest events.

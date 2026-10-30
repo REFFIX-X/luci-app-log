@@ -121,20 +121,8 @@ jobs:
           SUBJECT="$(git log -1 --format=%s "$GITHUB_SHA")"
           TAG="${SUBJECT#release: }"
           case "$TAG" in v*) ;; *) echo "Release commit must start with 'release: v'" >&2; exit 1 ;; esac
-          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
-          # REFFIX Firewall Log ${TAG}
-
-          Standalone OpenWrt packages for aarch64_cortex-a53 routers, including GL.iNet Flint4 / MediaTek Filogic.
-
-          Assets:
-          - OpenWrt 25.12 APK app and matching libmaxminddb helper.
-          - SHA-256 checksums for the APK package pair.
-
-          The existing luci-app-log-viewer package name is retained for in-place upgrades.
-          The release is source-validated; test on-router before production use. GeoLite2 data is downloaded separately.
-          EOF
-          # Do not carry forward a partial release from an interrupted build.
+          # Replace a partial release, but keep an annotated tag already pushed for this commit.
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release delete "$TAG" --yes --cleanup-tag
+            gh release delete "$TAG" --yes
           fi
-          gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "$TAG - REFFIX Firewall Log" --notes-file "$RUNNER_TEMP/release-notes.md"
+          gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "$TAG - REFFIX Firewall Log" --notes-file .github/RELEASE_NOTES.md
