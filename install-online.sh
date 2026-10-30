@@ -33,7 +33,7 @@ verify_checksums() {
 }
 
 command -v apk >/dev/null 2>&1 || {
-  echo "ERROR: REFFIX Log Viewer v2 requires APK on OpenWrt 25.12 or a supported MediaTek Filogic snapshot. IPK/opkg releases are no longer built." >&2
+  echo "ERROR: REFFIX Firewall Log requires APK on OpenWrt 25.12 or a supported MediaTek Filogic snapshot. IPK/opkg releases are no longer built." >&2
   exit 1
 }
 if [ -r /etc/openwrt_release ]; then . /etc/openwrt_release; fi

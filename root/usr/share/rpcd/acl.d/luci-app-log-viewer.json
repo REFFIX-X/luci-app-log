@@ -1,15 +1,27 @@
 {
   "luci-app-log-viewer": {
-    "description": "Grant access to log-viewer procedures",
+    "description": "Grant access to firewall log procedures",
     "read": {
       "cgi-io": [
         "exec"
       ],
+      "ubus": {
+        "file": [
+          "read",
+          "exec"
+        ],
+        "log": [
+          "read"
+        ]
+      },
       "file": {
         "/sbin/logread*": [
           "exec"
         ],
         "/usr/sbin/logread*": [
+          "exec"
+        ],
+        "/usr/libexec/logread-ubox*": [
           "exec"
         ],
         "/usr/bin/flint4-geoip": [
@@ -24,8 +36,13 @@
       }
     },
     "write": {
+      "ubus": {
+        "file": [
+          "exec"
+        ]
+      },
       "file": {
-        "/usr/sbin/infra-port-watch-config set": [
+        "/usr/sbin/infra-port-watch-config": [
           "exec"
         ]
       }

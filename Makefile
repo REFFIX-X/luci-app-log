@@ -20,7 +20,7 @@ define Package/luci-app-log-viewer
   SUBMENU:=3. Applications
   TITLE:=REFFIX Firewall Log
   URL:=https://github.com/REFFIX-X/luci-app-log
-  DEPENDS:=+ucode +ucode-mod-fs +libmaxminddb +iptables-nft +jsonfilter
+  DEPENDS:=+luci-base +logd +ucode +ucode-mod-fs +libmaxminddb +iptables-nft +jsonfilter
   PKGARCH:=all
 endef
 
@@ -40,7 +40,7 @@ define Package/luci-app-log-viewer/install
 	$(INSTALL_DIR) $(1)/www
 	$(CP) ./htdocs/* $(1)/www/
 	$(CP) ./root/* $(1)/
-	chmod 755 $(1)/usr/bin/flint4-geoip $(1)/usr/bin/flint4-geoip-update $(1)/usr/sbin/infra-port-watch $(1)/usr/sbin/infra-port-watch-config $(1)/etc/init.d/infra-port-watch $(1)/etc/infra-port-watch.sh
+	chmod 755 $(1)/usr/bin/flint4-geoip $(1)/usr/bin/flint4-geoip-update $(1)/usr/sbin/infra-port-watch $(1)/usr/sbin/infra-port-watch-config $(1)/etc/init.d/infra-port-watch $(1)/etc/infra-port-watch.sh $(1)/etc/hotplug.d/iface/99-infra-port-watch
 endef
 
 define Package/luci-app-log-viewer/postinst
@@ -48,6 +48,8 @@ define Package/luci-app-log-viewer/postinst
 [ -n "$${IPKG_INSTROOT}" ] && exit 0
 /etc/init.d/infra-port-watch enable
 /etc/init.d/infra-port-watch start || echo "WARNING: WAN watch rule could not start; configure the WAN device and restart infra-port-watch."
+rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
+/etc/init.d/rpcd restart >/dev/null 2>&1 || true
 exit 0
 endef
 

@@ -1,6 +1,7 @@
 'use strict';
 'require view';
 'require fs';
+'require rpc';
 'require ui';
 
 const MAX_LINES = 1500;
@@ -65,6 +66,20 @@ function parseRouterTimestamp(timestamp, routerOffset) {
   const wallTime = Date.UTC(Number(fields[6]), month, Number(fields[2]), Number(fields[3]), Number(fields[4]), Number(fields[5]));
   const minutesEast = (Number(offset[2]) * 60 + Number(offset[3])) * (offset[1] === '-' ? -1 : 1);
   return wallTime - minutesEast * 60000;
+}
+
+function formatLogreadTimestamp(epochMs, routerOffset) {
+  const ms = Number(epochMs);
+  const offset = String(routerOffset || '').match(/^([+-])(\d{2})(\d{2})$/);
+  if (!Number.isFinite(ms) || ms <= 0 || !offset) return '';
+  const minutesEast = (Number(offset[2]) * 60 + Number(offset[3])) * (offset[1] === '-' ? -1 : 1);
+  const wall = new Date(ms + minutesEast * 60000);
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const pad = n => String(n).padStart(2, '0');
+  return days[wall.getUTCDay()] + ' ' + months[wall.getUTCMonth()] + ' ' + wall.getUTCDate() + ' ' +
+    pad(wall.getUTCHours()) + ':' + pad(wall.getUTCMinutes()) + ':' + pad(wall.getUTCSeconds()) + ' ' +
+    wall.getUTCFullYear();
 }
 
 function parseLine(line, index, routerOffset) {
@@ -136,6 +151,22 @@ function countryFlag(code) {
     '" width="20" loading="lazy" decoding="async">';
 }
 
+function downloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const link = E('a', {href: url, download: filename});
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+const callLogRead = rpc.declare({
+  object: 'log',
+  method: 'read',
+  params: ['lines', 'stream', 'oneshot'],
+  expect: { log: [] }
+});
+
 let historyDatabasePromise = null;
 function openHistoryDatabase() {
   if (!window.indexedDB) return Promise.reject(new Error('IndexedDB is unavailable in this browser'));
@@ -204,6 +235,8 @@ return view.extend({
   timelineRange: null,
   liveEvents: [],
   sourceLineCount: 0,
+  logReadLimit: MAX_LINES,
+  watchConfigRequest: 0,
   lastCollectedAt: 0,
   lastRawData: null,
   geoStatus: null,
@@ -212,14 +245,50 @@ return view.extend({
   filterPresets: [],
   refreshGeneration: 0,
 
-  getLogData: function() {
-    // Fetch a bounded tail and filter in JavaScript. The -e regex syntax in
-    // OpenWrt logread is not consistently extended regex, so alternation like
-    // (INFRA_PORT_HIT|DROP|REJECT) can match nothing on valid router builds.
-    return fs.exec_direct('/sbin/logread', ['-l', String(MAX_LINES)], 'text')
-      .catch(function() {
-        return fs.exec_direct('/usr/sbin/logread', ['-l', String(MAX_LINES)], 'text');
-      });
+  getLogData: async function() {
+    // ubus log.read is the OpenWrt 25.12 path. file.exec of logread is capped
+    // at 256 KiB, which silently drops the newest lines of a 1,500-line tail.
+    // OpenWrt also installs the binary as /usr/libexec/logread-ubox and only
+    // optionally links /sbin/logread, so that path stays as a fallback.
+    const offset = (this.watchConfig && this.watchConfig.router_offset) || '+0000';
+    const formatEntries = (entries, limit) => {
+      this.logReadLimit = limit;
+      return entries.map(entry => {
+        const msg = String(entry && entry.msg != null ? entry.msg : '').replace(/[\r\n]+/g, ' ').trim();
+        if (!msg) return '';
+        const stamp = formatLogreadTimestamp(entry && entry.time, offset);
+        return stamp ? (stamp + ' ' + msg) : msg;
+      }).filter(Boolean).join('\n');
+    };
+    const readEntries = async (limit) => {
+      const entries = await callLogRead(limit, false, true);
+      return Array.isArray(entries) ? entries : null;
+    };
+
+    try {
+      const entries = await readEntries(MAX_LINES);
+      if (entries) return formatEntries(entries, MAX_LINES);
+    }
+    catch (e) {
+      try {
+        const entries = await readEntries(400);
+        if (entries) return formatEntries(entries, 400);
+      }
+      catch (e2) {}
+    }
+
+    this.logReadLimit = MAX_LINES;
+    const commands = ['/sbin/logread', '/usr/sbin/logread', '/usr/libexec/logread-ubox'];
+    let lastError = new Error('logread not found');
+    for (let i = 0; i < commands.length; i++) {
+      try {
+        return await fs.exec_direct(commands[i], ['-l', String(MAX_LINES)], 'text');
+      }
+      catch (e) {
+        lastError = e;
+      }
+    }
+    throw lastError;
   },
 
   loadPolicyRules: async function() {
@@ -237,14 +306,17 @@ return view.extend({
 
   loadWatchConfig: async function(force) {
     if (this.watchConfigLoaded && !force) return;
+    const request = ++this.watchConfigRequest;
     this.watchConfigLoaded = true;
     try {
       const raw = await fs.exec_direct('/usr/sbin/infra-port-watch', ['get'], 'text');
+      if (request !== this.watchConfigRequest) return;
       this.watchConfig = JSON.parse(raw || '{}');
       this.routerClockAtSync = Number(this.watchConfig.router_time || 0) * 1000;
       this.routerClockSyncedAt = Date.now();
     }
     catch (e) {
+      if (request !== this.watchConfigRequest) return;
       this.watchConfig = null;
     }
   },
@@ -489,10 +561,7 @@ return view.extend({
         insightsOpen: !!this.insightsDisclosure.open
       }
     };
-    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'}));
-    const link = E('a', {href: url, download: 'reffix-firewall-log-settings.json'});
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+    downloadBlob('reffix-firewall-log-settings.json', new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'}));
   },
 
   importSettings: function(file) {
@@ -920,7 +989,7 @@ return view.extend({
     this.statusText.textContent = this.paused
       ? _('Auto-refresh paused · manually refreshed at ') + (new Date()).toLocaleTimeString()
       : _('Live · updated ') + (new Date()).toLocaleTimeString();
-    this.logStatus.textContent = _('Read ') + this.sourceLineCount + _(' of up to ') + MAX_LINES +
+    this.logStatus.textContent = _('Read ') + this.sourceLineCount + _(' of up to ') + this.logReadLimit +
       _(' most recent source lines · source limit · collected ') + new Date(this.lastCollectedAt).toLocaleString();
     this.renderWatchStatus();
     if (changed) {
@@ -932,6 +1001,7 @@ return view.extend({
     if (!this.geoStatusCheckedAt || Date.now() - this.geoStatusCheckedAt > 5 * 60 * 1000) {
       this.geoStatusCheckedAt = Date.now();
       this.loadGeoStatus().then(() => {
+        if (generation !== this.refreshGeneration) return;
         this.renderGeoStatus();
         if (changed && this.geoStatus && this.geoStatus.available) this.enrichAndRender();
       });
@@ -941,11 +1011,11 @@ return view.extend({
 
   enrichAndRender: function() {
     if (!this.tbody || !this.tbody.isConnected) return;
+    const generation = this.refreshGeneration;
     this.enrich(this.events.slice(0, 60)).then(() => {
-      if (this.tbody && this.tbody.isConnected) {
-        this.renderRows();
-        this.renderInsightsPanel();
-      }
+      if (generation !== this.refreshGeneration || !this.tbody || !this.tbody.isConnected) return;
+      this.renderRows();
+      this.renderInsightsPanel();
     });
   },
 
@@ -1705,10 +1775,8 @@ return view.extend({
       rows.push([e.timestamp,e.source,geo.country_name || '',geo.asn_organization || '',e.destination,e.dport,e.service,e.protocol,e.kind,e.marker || e.prefix,e.policyLabel || '',e.policyNote || '',e.sport,e.iface]);
     });
     const csv = rows.map(r => r.map(csvCell).join(',')).join('\r\n');
-    const url = URL.createObjectURL(new Blob([csv], {type: 'text/csv;charset=utf-8'}));
-    const link = E('a', {href: url, download: allLoaded ? 'firewall-log-all-loaded.csv' : 'firewall-log-filtered.csv'});
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+    downloadBlob(allLoaded ? 'firewall-log-all-loaded.csv' : 'firewall-log-filtered.csv',
+      new Blob([csv], {type: 'text/csv;charset=utf-8'}));
   },
 
   remove: function() {
