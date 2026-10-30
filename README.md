@@ -1,3 +1,5 @@
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/c0774cb6-6b59-4271-b1c7-5aa9944f68a8" />
+
 # REFFIX Firewall Log
 
 REFFIX Firewall Log for OpenWrt LuCI, with local GeoIP enrichment.
