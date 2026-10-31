@@ -6,8 +6,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-log-viewer
-# REFFIX v3.1.3; OpenWrt 25.12 APK only
-PKG_VERSION:=3.1.3
+# REFFIX v3.2.0; OpenWrt 25.12 APK only
+PKG_VERSION:=3.2.0
 PKG_RELEASE:=1
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=REFFIX

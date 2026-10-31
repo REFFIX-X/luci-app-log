@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.2.0 (2026-10-31)
+
+- Give each source address its own WAN log budget: 30 per minute after a burst of 15 on a known port, 4 per minute after a burst of 4 when that port is also an enabled firewall forward, and 2 per minute after a burst of 5 for every other port. Listed ports use iptables goto so they are not logged again by the other-port chain. If hashlimit is missing, the same rates fall back to one shared limit. The watch still only logs IPv4 TCP SYN and UDP, then returns the packet.
+- Classify a known-port probe with no allow and no forward as **Blocked**, subtitle **Default deny**. Classify a port outside the list as **Other**, subtitle **Not on the watch list**. Add TR-069 (7547), MikroTik (8291), MQTT TLS (8883), kubelet (10250), and WireGuard (51820) to the default list. An upgrade keeps the saved UCI port list; those five ports apply to a new install or an empty list. The other-port sample runs either way.
+- Look up GeoIP in one `flint4-geoip --batch` call per chunk. Remember positive hits in the browser for 7 days. Reload WAN watch status about once a minute instead of on every 15-second log tick.
+- Keep up to 500 firewall lines, including `INFRA_PORT_OTHER`, in `/tmp/log-viewer/events.ring`. `log-viewer-history` updates that ring every 15 seconds and is enabled with the package. The ring is cleared on reboot. Browser history is unchanged.
+- Group Settings into WAN watch, exposed labels, history, and files. Saved filters stay on the toolbar. An insight filter names what its clear button removes. The page does not offer LuCI Save & Apply.
+
 ## v3.1.3 (2026-10-30)
 
 - Grant LuCI exec access to `/usr/sbin/infra-port-watch-config` itself. An ACL entry of `infra-port-watch-config set` does not match the real command line, which also carries the interface and port list, and rpcd rejects argument strings longer than 1024 bytes before the pattern is tested. Saving WAN watch settings from the page failed with access denied.

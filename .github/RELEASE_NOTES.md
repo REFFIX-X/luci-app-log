@@ -1,16 +1,27 @@
-# REFFIX Firewall Log v3.1.3
+# REFFIX Firewall Log v3.2.0
 
-OpenWrt 25.12 bugfix release for installing and using Firewall Log. The package name remains `luci-app-log-viewer`.
+OpenWrt 25.12 release for the WAN watch and the Firewall Log page. The package name remains `luci-app-log-viewer`. IPv4 only.
 
-## Fixes
+## WAN watch
 
-- LuCI can save WAN watch settings. The exec ACL grants `/usr/sbin/infra-port-watch-config`. The previous entry matched only `set` with no arguments, so saving the interface and port list was denied. A long port list also exceeds rpcd's 1024-byte command check.
-- Firewall Log reads ubus `log.read` first (1,500 entries, then 400 if that call fails), then `logread` at `/sbin/logread`, `/usr/sbin/logread`, and `/usr/libexec/logread-ubox`. OpenWrt 25.12 installs logread under `/usr/libexec`, and LuCI `file.exec` keeps only about 256 KiB.
-- The WAN watch is applied again when interface `wan` comes up, so a boot before PPPoE or DHCP still installs the log-only rule.
-- `infra-port-watch get` still prints status when `/etc/config/firewall` is missing.
-- Package install restarts `rpcd` and clears the LuCI menu cache. The source overlay installs country flags, the policy example, and the WAN hotplug hook.
-- CSV and settings downloads work in browsers that ignore a click on a detached link.
-- The package depends on `luci-base` and `logd`.
+Each source address has its own log budget:
+
+- Known ports: 30 per minute after a burst of 15.
+- A known port that is also an enabled firewall forward: 4 per minute after a burst of 4.
+- Any other port: 2 per minute after a burst of 5.
+
+Listed ports jump to their log chain with goto, so they are not sampled again. Both chains only log, then return the packet. The watch does not accept or drop. If the hashlimit match is unavailable, those rates fall back to one shared limit and the status line says so.
+
+**Blocked** is a known-port probe with no allow and no forward. The subtitle is **Default deny**: the watch logged the probe, and the firewall's default policy drops it later. **Other** is the low-rate sample of a port that is not on the list. The subtitle is **Not on the watch list**. Logging every dropped packet is still not done.
+
+The default list adds TR-069 (7547), MikroTik (8291), MQTT TLS (8883), kubelet (10250), and WireGuard (51820). `/etc/config/infra-port-watch` is a conffile, so an upgrade keeps the port list you already saved. Those five ports are used for a new install and when the list is empty. The other-port sample does not need a list edit. Package install and `install.sh` start the watch again, which replaces the previous raw-table rules. If the rules look unchanged, run `/etc/init.d/infra-port-watch restart`.
+
+## Page
+
+- GeoIP looks up a batch of addresses in one `flint4-geoip --batch` call. Positive hits stay in this browser for 7 days.
+- The 15-second timer reloads log lines. WAN watch status reloads about once a minute.
+- The router keeps up to 500 firewall lines in `/tmp/log-viewer/events.ring`, including other-port samples. That memory ring is updated every 15 seconds and cleared on reboot. Browser history is separate.
+- Settings is grouped into WAN watch, exposed labels, history, and files. Saved filters stay with the other filters. This page does not offer Save & Apply.
 
 GeoLite2 databases are downloaded separately and are not in the APK. See the README for install steps and licensing.
 
