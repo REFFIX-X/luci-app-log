@@ -32,6 +32,87 @@ verify_checksums() {
   (cd "$TMP" && sha256sum -c SHA256SUMS.txt)
 }
 
+pkgver_of() {
+  tar -xOf "$1" .PKGINFO 2>/dev/null | sed -n 's/^pkgver = //p' | head -n 1
+}
+
+installed_pkgver() {
+  name="$1"
+  apk list -I "$name" 2>/dev/null | sed -n "s/^${name}-\\([^ ]*\\) .*/\\1/p" | head -n 1
+}
+
+pkg_action() {
+  name="$1"
+  file="$2"
+  PKG_NEW="$(pkgver_of "$file")"
+  [ -n "$PKG_NEW" ] || { echo "ERROR: $file has no package version." >&2; return 1; }
+  PKG_OLD="$(installed_pkgver "$name")"
+  if [ -z "$PKG_OLD" ]; then
+    PKG_ACT=install
+    return 0
+  fi
+  rel="$(apk version -t "$PKG_OLD" "$PKG_NEW" 2>/dev/null || printf '?')"
+  case "$rel" in
+    '<') PKG_ACT=upgrade ;;
+    '=') PKG_ACT=same ;;
+    '>') PKG_ACT=keep ;;
+    *) PKG_ACT=replace ;;
+  esac
+}
+
+install_downloaded_packages() {
+  lib="$1"
+  app="$2"
+  pkg_action libmaxminddb "$lib" || return 1
+  lib_act="$PKG_ACT"
+  lib_old="$PKG_OLD"
+  lib_new="$PKG_NEW"
+  pkg_action luci-app-log-viewer "$app" || return 1
+  app_act="$PKG_ACT"
+  app_old="$PKG_OLD"
+  app_new="$PKG_NEW"
+  if [ "$app_act" = same ]; then app_act=replace; fi
+  if [ "$lib_act" = same ]; then
+    if [ "$app_act" = replace ]; then lib_act=replace; else lib_act=keep; fi
+  fi
+  # A failed version comparison must not delete the library out from under a newer app.
+  if [ "$app_act" = keep ] && [ "$lib_act" = replace ]; then lib_act=keep; fi
+  case "$lib_act" in
+    install) echo "Installing libmaxminddb $lib_new." ;;
+    upgrade) echo "Upgrading libmaxminddb from $lib_old to $lib_new." ;;
+    replace) echo "Replacing installed libmaxminddb $lib_old." ;;
+    keep)
+      if [ -n "$lib_old" ] && [ "$lib_old" != "$lib_new" ]; then
+        echo "Installed libmaxminddb $lib_old is newer than $lib_new; leaving it."
+      fi
+      ;;
+  esac
+  case "$app_act" in
+    install) echo "Installing luci-app-log-viewer $app_new." ;;
+    upgrade) echo "Upgrading luci-app-log-viewer from $app_old to $app_new." ;;
+    replace) echo "Replacing installed luci-app-log-viewer $app_old." ;;
+    keep) echo "Installed luci-app-log-viewer $app_old is newer than $app_new; leaving it." ;;
+  esac
+  if [ "$lib_act" = keep ] && [ "$app_act" = keep ]; then
+    return 0
+  fi
+  if [ "$lib_act" = replace ] && [ "$app_act" != keep ] && [ "$app_act" != install ]; then
+    apk del luci-app-log-viewer
+  elif [ "$app_act" = replace ]; then
+    apk del luci-app-log-viewer
+  fi
+  if [ "$lib_act" = replace ]; then
+    apk del libmaxminddb
+  fi
+  if [ "$lib_act" != keep ] && [ "$app_act" != keep ]; then
+    apk add --allow-untrusted --upgrade "$lib" "$app"
+  elif [ "$lib_act" != keep ]; then
+    apk add --allow-untrusted --upgrade "$lib"
+  elif [ "$app_act" != keep ]; then
+    apk add --allow-untrusted --upgrade "$app"
+  fi
+}
+
 command -v apk >/dev/null 2>&1 || {
   echo "ERROR: REFFIX Firewall Log requires APK on OpenWrt 25.12 or a supported MediaTek Filogic snapshot. IPK/opkg releases are no longer built." >&2
   exit 1
@@ -102,7 +183,7 @@ if [ -z "$VERSION" ]; then
 fi
 
 echo "Installing checksum-verified GeoIP helper and REFFIX Log Viewer..."
-apk add --allow-untrusted \
+install_downloaded_packages \
   "$TMP/reffix-libmaxminddb-openwrt-${FAMILY}.${EXT}" \
   "$TMP/reffix-luci-app-log-viewer-openwrt-${FAMILY}.${EXT}"
 
@@ -117,4 +198,4 @@ fi
 
 /etc/init.d/rpcd restart
 echo "Done. Open Status -> Firewall Log in LuCI."
-echo "The existing luci-app-log-viewer package was upgraded in place; do not uninstall it first."
+echo "Running this installer again upgrades an older luci-app-log-viewer, or replaces the same release. Your saved /etc/config/infra-port-watch stays."
