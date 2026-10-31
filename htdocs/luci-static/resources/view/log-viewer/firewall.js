@@ -95,6 +95,27 @@ function appendWatchPort(portsText, port) {
   existing.push(portNumber);
   return {ok: true, changed: true, ports: existing.join(',')};
 }
+
+const DEFAULT_WATCH_PORTS = [21, 22, 23, 25, 53, 69, 80, 81, 110, 111, 123, 135, 137, 138, 139, 143, 161, 162, 179, 389, 427, 443, 445, 465, 500, 502, 514, 515, 520, 548, 554, 587, 631, 636, 873, 902, 989, 990, 993, 995, 1080, 1194, 1433, 1434, 1521, 1701, 1723, 1883, 1900, 2049, 2082, 2083, 2181, 2222, 2375, 2376, 2483, 2484, 3000, 3128, 3268, 3306, 3389, 3690, 4444, 4500, 5000, 5001, 5060, 5061, 5432, 5555, 5601, 5672, 5900, 5985, 5986, 6379, 6443, 6667, 7001, 7070, 7443, 7547, 7777, 8000, 8008, 8080, 8081, 8088, 8291, 8443, 8883, 8888, 9000, 9042, 9090, 9200, 9300, 9418, 10000, 10250, 11211, 27017, 51820];
+
+function mergeMissingDefaultPorts(portsText, defaults) {
+  const existing = [];
+  for (const token of String(portsText || '').split(/[\s,]+/)) {
+    if (!token) continue;
+    if (!/^\d{1,5}$/.test(token)) return {ok: false, reason: 'invalid'};
+    const value = Number(token);
+    if (value < 1 || value > 65535) return {ok: false, reason: 'invalid'};
+    if (!existing.includes(value)) existing.push(value);
+  }
+  const added = [];
+  for (const port of defaults) {
+    const value = Number(port);
+    if (!existing.includes(value)) added.push(value);
+  }
+  if (existing.length + added.length > 256)
+    return {ok: false, reason: 'full', added: [], ports: existing.join(',')};
+  return {ok: true, added, ports: existing.concat(added).join(',')};
+}
 const SERVICES = {
   21:'FTP',22:'SSH',23:'Telnet',25:'SMTP',53:'DNS',69:'TFTP',80:'HTTP',
   110:'POP3',123:'NTP',135:'MS RPC',139:'NetBIOS',143:'IMAP',161:'SNMP',
@@ -827,6 +848,21 @@ return view.extend({
       E('label', {class: 'fw-settings-field fw-watch-toggle'}, [watching, E('span', {}, _('Enable WAN port watch'))]),
       E('label', {class: 'fw-settings-field'}, [E('span', {}, _('WAN interface (auto or device name shown in IN=)')), interfaces]),
       E('label', {class: 'fw-settings-field'}, [E('span', {}, _('Ports to log (1–65535; comma or whitespace separated; up to 256)')), watchPorts]),
+      E('div', {class: 'fw-settings-actions'}, [
+        E('button', {class: 'cbi-button', type: 'button', click: () => {
+          const next = mergeMissingDefaultPorts(watchPorts.value, DEFAULT_WATCH_PORTS);
+          if (!next.ok) {
+            ui.addNotification(null, E('p', next.reason === 'full'
+              ? _('Adding the missing default ports would pass 256 ports.')
+              : _('The port list contains a value that cannot be kept.')), 'error');
+            return;
+          }
+          watchPorts.value = next.ports;
+          ui.addNotification(null, E('p', next.added.length
+            ? _('Added ') + next.added.length + _(' missing default ports. Save settings to apply them.')
+            : _('Every default port is already in the list.')), 'info');
+        }}, _('Add missing default ports'))
+      ]),
       E('label', {class: 'fw-settings-field'}, [E('span', {}, _('Exposed destination ports (one port = label per line)')), ports]),
       E('div', {class: 'right'}, [
         E('button', {class: 'cbi-button', click: ui.hideModal}, _('Cancel')),
@@ -896,6 +932,25 @@ return view.extend({
     this.renderWatchStatus();
     ui.hideModal();
     ui.addNotification(null, E('p', _('Port ') + port + _(' is on the known list. Later hits use the full per-address budget.')), 'info');
+  },
+
+  updateGeoDatabases: async function() {
+    if (this.geoUpdateButton) this.geoUpdateButton.disabled = true;
+    if (this.geoStatusText) this.geoStatusText.textContent = _('Updating GeoIP databases…');
+    try {
+      const output = await fs.exec_direct('/usr/bin/flint4-geoip-update', [], 'text', false, true);
+      await this.loadGeoStatus();
+      this.renderGeoStatus();
+      ui.addNotification(null, E('p', String(output || '').trim() || _('GeoLite2 Country and ASN databases updated.')), 'info');
+    }
+    catch (e) {
+      ui.addNotification(null, E('p', _('GeoIP databases were not updated: ') + (e.message || e)), 'error');
+      try { await this.loadGeoStatus(); this.renderGeoStatus(); }
+      catch (statusError) {}
+    }
+    finally {
+      if (this.geoUpdateButton) this.geoUpdateButton.disabled = false;
+    }
   },
 
   getTimeWindowMs: function() {
@@ -1900,7 +1955,10 @@ return view.extend({
           E('div', {class: 'fw-settings-actions'}, [
             E('button', {class: 'cbi-button', click: () => this.exportCSV(true)}, _('Export all loaded events')),
             E('button', {class: 'cbi-button', click: () => this.exportSettings()}, _('Download settings')),
-            E('label', {class: 'fw-file-import'}, [E('span', {}, _('Upload settings')), settingsFile])
+            E('label', {class: 'fw-file-import'}, [E('span', {}, _('Upload settings')), settingsFile]),
+            (this.geoUpdateButton = E('button', {class: 'cbi-button', click: () => {
+              this.updateGeoDatabases().catch(e => ui.addNotification(null, E('p', e.message || e), 'error'));
+            }}, _('Update GeoIP databases')))
           ]),
           this.logStatus,
           this.geoStatusText

@@ -100,3 +100,27 @@ test('the log type is one step smaller and an Other row can join the known list'
   assert.match(source, /Log this port at the full budget/);
   assert.match(source, /event\.kind === 'Other'/);
 });
+
+test('missing default ports are appended and GeoIP can be refreshed from settings', () => {
+  const mergeMissingDefaultPorts = extract('mergeMissingDefaultPorts');
+  const listed = source.match(/const DEFAULT_WATCH_PORTS = \[([^\]]+)\]/);
+  assert.ok(listed, 'the page must carry the default watch ports');
+  const defaults = listed[1].split(',').map(item => Number(item.trim()));
+  const uci = fs.readFileSync(path.join(__dirname, '../root/etc/config/infra-port-watch'), 'utf8');
+  const shipped = [...uci.matchAll(/list ports '(\d+)'/g)].map(match => Number(match[1]));
+  assert.deepEqual(defaults, shipped);
+
+  assert.deepEqual(mergeMissingDefaultPorts('25125,22', [22, 80, 443]), {
+    ok: true, added: [80, 443], ports: '25125,22,80,443'
+  });
+  assert.deepEqual(mergeMissingDefaultPorts('22, 80', [22, 80]), {
+    ok: true, added: [], ports: '22,80'
+  });
+  assert.equal(mergeMissingDefaultPorts('nope', [22]).ok, false);
+  const full = Array.from({length: 256}, (_, i) => i + 1).join(',');
+  assert.equal(mergeMissingDefaultPorts(full, [700]).reason, 'full');
+
+  assert.match(source, /Add missing default ports/);
+  assert.match(source, /Update GeoIP databases/);
+  assert.match(source, /\/usr\/bin\/flint4-geoip-update/);
+});

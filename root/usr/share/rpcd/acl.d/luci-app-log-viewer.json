@@ -53,6 +53,9 @@
         ],
         "/usr/sbin/log-viewer-history": [
           "exec"
+        ],
+        "/usr/bin/flint4-geoip-update": [
+          "exec"
         ]
       }
     }

@@ -20,7 +20,7 @@ define Package/luci-app-log-viewer
   SUBMENU:=3. Applications
   TITLE:=REFFIX Firewall Log
   URL:=https://github.com/REFFIX-X/luci-app-log
-  DEPENDS:=+luci-base +logd +ucode +ucode-mod-fs +libmaxminddb +iptables-nft +jsonfilter
+  DEPENDS:=+luci-base +logd +ucode +ucode-mod-fs +libmaxminddb +iptables-nft +iptables-mod-hashlimit +jsonfilter
   PKGARCH:=all
 endef
 

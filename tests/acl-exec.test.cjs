@@ -22,3 +22,8 @@ test('log reading is allowed through ubus and the OpenWrt 25.12 logread path', (
   assert.match(view, /object: 'log'/);
   assert.match(view, /\/usr\/libexec\/logread-ubox/);
 });
+
+test('GeoIP database refresh is granted as its own command', () => {
+  assert.ok(Object.keys(grant.write.file).includes('/usr/bin/flint4-geoip-update'));
+  assert.deepEqual(grant.write.file['/usr/bin/flint4-geoip-update'], ['exec']);
+});

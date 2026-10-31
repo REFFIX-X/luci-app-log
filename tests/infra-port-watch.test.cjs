@@ -9,6 +9,11 @@ const watcher = fs.readFileSync(path.join(root, 'root/usr/sbin/infra-port-watch'
 const writer = fs.readFileSync(path.join(root, 'root/usr/sbin/infra-port-watch-config'), 'utf8');
 const defaults = [...config.matchAll(/list ports '(\d+)'/g)].map(match => Number(match[1]));
 
+test('the package depends on the hashlimit match', () => {
+  const makefile = fs.readFileSync(path.join(root, 'Makefile'), 'utf8');
+  assert.match(makefile, /DEPENDS:=.*\+iptables-mod-hashlimit/);
+});
+
 test('ships the Flint4 default watchlist in UCI and the runtime fallback consistently', () => {
   const fallback = watcher.match(/ports="([0-9 ]+)"/);
   assert.ok(fallback, 'runtime helper must have a safe fallback port list');
