@@ -11,6 +11,7 @@ CONFIG=infra-port-watch.main
 MATCH_CHAIN=REFFIX_INFRA_WATCH
 LOG_CHAIN=INFRA_PORT_LOG
 FWD_CHAIN=INFRA_PORT_FWD
+OTHER_CHAIN=INFRA_PORT_OTHER
 RATE_NOTE=/tmp/log-viewer/watch-rate
 . /lib/functions.sh
 . /usr/share/libubox/jshn.sh
@@ -64,6 +65,8 @@ remove_rules() {
 	iptables -t raw -X "$LOG_CHAIN" 2>/dev/null || true
 	iptables -t raw -F "$FWD_CHAIN" 2>/dev/null || true
 	iptables -t raw -X "$FWD_CHAIN" 2>/dev/null || true
+	iptables -t raw -F "$OTHER_CHAIN" 2>/dev/null || true
+	iptables -t raw -X "$OTHER_CHAIN" 2>/dev/null || true
 }
 
 remember_forward_port() {
@@ -128,7 +131,7 @@ split_port_budgets() {
 
 load_ports() {
 	ports="$(uci_get "$CONFIG.ports")"
-	[ -n "$ports" ] || ports="21 22 23 25 53 69 80 81 110 111 123 135 137 138 139 143 161 162 179 389 427 443 445 465 500 502 514 515 520 548 554 587 631 636 873 902 989 990 993 995 1080 1194 1433 1434 1521 1701 1723 1883 1900 2049 2082 2083 2181 2222 2375 2376 2483 2484 3000 3128 3268 3306 3389 3690 4444 4500 5000 5001 5060 5061 5432 5555 5601 5672 5900 5985 5986 6379 6443 6667 7001 7070 7443 7777 8000 8008 8080 8081 8088 8443 8888 9000 9042 9090 9200 9300 9418 10000 11211 27017"
+	[ -n "$ports" ] || ports="21 22 23 25 53 69 80 81 110 111 123 135 137 138 139 143 161 162 179 389 427 443 445 465 500 502 514 515 520 548 554 587 631 636 873 902 989 990 993 995 1080 1194 1433 1434 1521 1701 1723 1883 1900 2049 2082 2083 2181 2222 2375 2376 2483 2484 3000 3128 3268 3306 3389 3690 4444 4500 5000 5001 5060 5061 5432 5555 5601 5672 5900 5985 5986 6379 6443 6667 7001 7070 7443 7547 7777 8000 8008 8080 8081 8088 8291 8443 8883 8888 9000 9042 9090 9200 9300 9418 10000 10250 11211 27017 51820"
 	ports="$(printf '%s' "$ports" | tr ',\n\t' '   ')"
 	NORMALIZED_PORTS=""
 	for port in $ports; do
@@ -161,10 +164,12 @@ add_group_rule() {
 	protocol="$1"
 	ports="$2"
 	chain="$3"
+	# goto: a listed port returns to PREROUTING from the log chain, so it does not
+	# also match the low-rate rule later in MATCH_CHAIN.
 	if [ "$protocol" = tcp ]; then
-		iptables -t raw -A "$MATCH_CHAIN" -i "$WAN_IF" -p tcp -m multiport --dports "$ports" -m tcp --syn -j "$chain"
+		iptables -t raw -A "$MATCH_CHAIN" -i "$WAN_IF" -p tcp -m multiport --dports "$ports" -m tcp --syn -g "$chain"
 	else
-		iptables -t raw -A "$MATCH_CHAIN" -i "$WAN_IF" -p udp -m multiport --dports "$ports" -j "$chain"
+		iptables -t raw -A "$MATCH_CHAIN" -i "$WAN_IF" -p udp -m multiport --dports "$ports" -g "$chain"
 	fi
 }
 
@@ -173,6 +178,7 @@ install_log_chain() {
 	table="$2"
 	rate="$3"
 	burst="$4"
+	prefix="$5"
 	iptables -t raw -N "$chain" 2>/dev/null || true
 	iptables -t raw -F "$chain" || return 1
 	if iptables -t raw -A "$chain" -m hashlimit \
@@ -181,13 +187,13 @@ install_log_chain() {
 		--hashlimit-upto "$rate" \
 		--hashlimit-burst "$burst" \
 		--hashlimit-htable-expire 120000 \
-		-j LOG --log-prefix 'INFRA_PORT_HIT: ' --log-level 4
+		-j LOG --log-prefix "$prefix" --log-level 4
 	then
 		:
 	else
 		LOG_MODE=shared
 		iptables -t raw -A "$chain" -m limit --limit "$rate" --limit-burst "$burst" \
-			-j LOG --log-prefix 'INFRA_PORT_HIT: ' --log-level 4 || return 1
+			-j LOG --log-prefix "$prefix" --log-level 4 || return 1
 	fi
 	iptables -t raw -A "$chain" -j RETURN || return 1
 }
@@ -212,12 +218,15 @@ apply_rules() {
 	LOG_MODE=per-source
 	iptables -t raw -N "$MATCH_CHAIN" 2>/dev/null || true
 	iptables -t raw -F "$MATCH_CHAIN" || return 1
-	install_log_chain "$LOG_CHAIN" reffix_scan 30/minute 15 || return 1
-	install_log_chain "$FWD_CHAIN" reffix_fwd 4/minute 4 || return 1
+	install_log_chain "$LOG_CHAIN" reffix_scan 30/minute 15 'INFRA_PORT_HIT: ' || return 1
+	install_log_chain "$FWD_CHAIN" reffix_fwd 4/minute 4 'INFRA_PORT_HIT: ' || return 1
+	install_log_chain "$OTHER_CHAIN" reffix_other 2/minute 5 'INFRA_PORT_OTHER: ' || return 1
 	mkdir -p /tmp/log-viewer
 	printf '%s\n' "$LOG_MODE" > "$RATE_NOTE"
 	[ -z "$SCAN_PORTS" ] || { install_groups tcp "$SCAN_PORTS" "$LOG_CHAIN"; install_groups udp "$SCAN_PORTS" "$LOG_CHAIN"; }
 	[ -z "$FWD_PORTS" ] || { install_groups tcp "$FWD_PORTS" "$FWD_CHAIN"; install_groups udp "$FWD_PORTS" "$FWD_CHAIN"; }
+	iptables -t raw -A "$MATCH_CHAIN" -i "$WAN_IF" -p tcp -m tcp --syn -j "$OTHER_CHAIN" || return 1
+	iptables -t raw -A "$MATCH_CHAIN" -i "$WAN_IF" -p udp -j "$OTHER_CHAIN" || return 1
 	iptables -t raw -A "$MATCH_CHAIN" -j RETURN || return 1
 	iptables -t raw -I PREROUTING 1 -j "$MATCH_CHAIN" || return 1
 	echo "INFRA_PORT_WATCH installed on $WAN_IF"
@@ -244,9 +253,9 @@ print_config() {
 	json_add_string address_family 'IPv4 only'
 	rate_mode="$(cat "$RATE_NOTE" 2>/dev/null || echo per-source)"
 	if [ "$rate_mode" = shared ]; then
-		json_add_string log_rate 'shared fallback, hashlimit unavailable: 30 per minute, forwarded ports 4 per minute'
+		json_add_string log_rate 'shared fallback, hashlimit unavailable: 30 per minute, forwarded ports 4 per minute, other ports 2 per minute'
 	else
-		json_add_string log_rate '30 per minute per source after burst of 15; forwarded ports 4 per minute per source'
+		json_add_string log_rate '30 per minute per source after burst of 15; forwarded ports 4 per minute per source; other ports 2 per minute per source after burst of 5'
 	fi
 	json_add_array redirects
 	# A missing firewall config must not hide WAN watch status.

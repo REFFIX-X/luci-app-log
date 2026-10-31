@@ -85,11 +85,11 @@ const SERVICES = {
   3306:'MySQL',3389:'RDP',4500:'IPsec NAT-T',5000:'Web/App',5001:'HTTPS/App',
   5060:'SIP',5061:'SIP TLS',5432:'PostgreSQL',5555:'ADB',5900:'VNC',
   5985:'WinRM',5986:'WinRM TLS',6379:'Redis',6443:'Kubernetes API',
-  6667:'IRC',7001:'WebLogic',7443:'HTTPS Alt',7777:'Game/Service',
+  6667:'IRC',7001:'WebLogic',7443:'HTTPS Alt',7547:'TR-069',7777:'Game/Service',
   8000:'HTTP Alt',8008:'HTTP Alt',8080:'HTTP Proxy',8081:'HTTP Alt',
-  8088:'HTTP Alt',8443:'HTTPS Alt',8888:'HTTP Alt',9000:'Web/App',
+  8088:'HTTP Alt',8291:'MikroTik',8443:'HTTPS Alt',8883:'MQTT TLS',8888:'HTTP Alt',9000:'Web/App',
   9042:'Cassandra',9090:'Web/App',9200:'Elasticsearch',9300:'Elasticsearch',
-  9418:'Git',10000:'Webmin',11211:'Memcached',27017:'MongoDB'
+  9418:'Git',10000:'Webmin',10250:'Kubelet',11211:'Memcached',27017:'MongoDB',51820:'WireGuard'
 };
 
 function esc(value) {
@@ -152,6 +152,7 @@ function formatLogreadTimestamp(epochMs, routerOffset) {
 }
 
 function parseLine(line, index, routerOffset) {
+  const otherHit = line.includes('INFRA_PORT_OTHER:');
   const infraHit = line.includes('INFRA_PORT_HIT:');
   const hasPacketTuple = /SRC=\S+.*DPT=\d+/.test(line);
   const blockMarker = /\b(?:DROP|REJECT)\b/i.test(line) ||
@@ -163,7 +164,11 @@ function parseLine(line, index, routerOffset) {
 
   let prefix = '';
   let kind = '';
-  if (infraHit) {
+  if (otherHit) {
+    prefix = 'INFRA_PORT_OTHER';
+    kind = 'Other';
+  }
+  else if (infraHit) {
     prefix = 'INFRA_PORT_HIT';
     kind = 'Blocked';
   }
@@ -429,26 +434,33 @@ return view.extend({
   },
 
   applyTrafficContext: function(event) {
-    if (event.prefix !== 'INFRA_PORT_HIT') return event;
+    const other = event.prefix === 'INFRA_PORT_OTHER';
+    if (event.prefix !== 'INFRA_PORT_HIT' && !other) return event;
 
-    event.kind = event.baseKind || 'Blocked';
-    event.policyLabel = event.basePolicyLabel || 'WAN watchlist';
+    event.kind = event.baseKind || (other ? 'Other' : 'Blocked');
+    event.policyLabel = event.basePolicyLabel || (other ? 'Not on the watch list' : 'Default deny');
     event.policyNote = event.basePolicyNote || '';
 
     const iface = String(event.iface || '').toLowerCase();
     const onWan = !this.wanInterfaces.length || this.wanInterfaces.includes(iface);
     if (!onWan) {
       event.kind = 'Observed';
-      event.policyNote = 'Watchlist hit on an interface not configured as WAN. Set the WAN interface list to classify it.';
+      event.policyNote = 'Probe on an interface not configured as WAN. Set the WAN interface to classify it.';
     }
     else if (this.exposedPorts[event.dport]) {
       event.kind = 'Exposed';
       event.policyLabel = this.exposedPorts[event.dport];
-      event.policyNote = 'Hit matches a configured exposed service. The watchlist line alone does not confirm whether the forward accepted it.';
+      event.policyNote = 'Hit matches a configured exposed service. This line does not confirm whether the forward accepted it.';
+    }
+    else if (other) {
+      event.kind = 'Other';
+      if (!event.basePolicyLabel) event.policyLabel = 'Not on the watch list';
+      event.policyNote = 'Low-rate sample of a port outside the watch list. Default policy drops it unless an allow or forward applies.';
     }
     else {
       event.kind = 'Blocked';
-      event.policyNote = 'WAN watchlist hit. Default-deny blocks this port unless an allow rule or port forward applies.';
+      if (!event.basePolicyLabel) event.policyLabel = 'Default deny';
+      event.policyNote = 'No allow or forward for this port. The watch logged the probe; the firewall default policy drops it.';
     }
     return event;
   },
@@ -459,7 +471,7 @@ return view.extend({
       const presets = JSON.parse(localStorage.getItem('reffix-log-viewer.filters') || '[]');
       this.filterPresets = Array.isArray(presets) ? presets.filter(p =>
         p && typeof p.name === 'string' && typeof p.query === 'string' &&
-        ['all', 'blocked', 'observed', 'allowed', 'exposed'].includes(p.kind) &&
+        ['all', 'blocked', 'other', 'observed', 'allowed', 'exposed'].includes(p.kind) &&
         ['all', 'tcp', 'udp'].includes(p.proto) &&
         ['all', '5m', '15m', '1h', '6h', '24h'].includes(p.window)
       ).slice(0, 20) : [];
@@ -548,8 +560,8 @@ return view.extend({
       event.policyLabel = String(rule.label || marker);
       event.policyNote = String(rule.note || '');
     }
-    if (marker === 'INFRA_PORT_HIT' && /logging-only match|does not by itself block/i.test(event.policyNote || ''))
-      event.policyNote = 'WAN watchlist hit. Default-deny blocks this port unless an allow rule or port forward applies.';
+    if ((marker === 'INFRA_PORT_HIT' || marker === 'INFRA_PORT_OTHER') && /logging-only match|does not by itself block/i.test(event.policyNote || ''))
+      event.policyNote = 'No allow or forward for this port. The watch logged the probe; the firewall default policy drops it.';
     event.baseKind = event.kind;
     event.basePolicyLabel = event.policyLabel;
     event.basePolicyNote = event.policyNote;
@@ -670,7 +682,7 @@ return view.extend({
       }
       const presets = Array.isArray(browser.filterPresets) ? browser.filterPresets.filter(p =>
         p && typeof p.name === 'string' && typeof p.query === 'string' &&
-        ['all', 'blocked', 'observed', 'allowed', 'exposed'].includes(p.kind) &&
+        ['all', 'blocked', 'other', 'observed', 'allowed', 'exposed'].includes(p.kind) &&
         ['all', 'tcp', 'udp'].includes(p.proto) && ['all', '5m', '15m', '1h', '6h', '24h'].includes(p.window)
       ).slice(0, 20) : [];
       const watcher = data.watcher;
@@ -978,7 +990,7 @@ return view.extend({
       '<div class="fw-insight"><h3>Top ASNs</h3>' + topAsns + '</div>' +
       '<div class="fw-insight"><h3>Scan / burst signals</h3><p class="fw-muted">Heuristic only: 8+ ports or 25+ events from one public source.</p>' + scanHtml + '</div>' +
       '<div class="fw-insight fw-insight-policy"><h3>Policy context</h3><p class="fw-muted">' + esc(policyNotes) + '</p>' +
-      '<p class="fw-muted">WAN watchlist hits are shown as Blocked under the default-deny policy. Explicit allow and port-forward rules can create exceptions; Allowed appears only when an allow rule logs it.</p></div>';
+      '<p class="fw-muted">A known-port probe is Blocked when nothing allows or forwards it. Other is a low-rate sample of a port outside that list. Allowed appears only when an allow rule logs it.</p></div>';
   },
 
 
@@ -1202,7 +1214,7 @@ return view.extend({
     const countryCode = (geo.country_code || '').toUpperCase();
     const country = geo.country_name || 'GeoIP unavailable';
     const asn = geo.asn_organization || '';
-    const kindClass = e.kind === 'Blocked' ? 'blocked' : (e.kind === 'Allowed' ? 'allowed' : (e.kind === 'Exposed' ? 'exposed' : 'observed'));
+    const kindClass = e.kind === 'Blocked' ? 'blocked' : (e.kind === 'Allowed' ? 'allowed' : (e.kind === 'Exposed' ? 'exposed' : (e.kind === 'Other' ? 'other' : 'observed')));
     const policyText = e.policyLabel || e.marker || e.prefix;
     const title = [e.marker || e.prefix, e.policyNote].filter(Boolean).join(' · ');
     return '<tr class="tr fw-' + kindClass + '" data-event-id="' + esc(e.id) + '">' +
@@ -1241,15 +1253,17 @@ return view.extend({
     const matching = this.getMatchingEvents(windowed);
     this.filteredEvents = matching;
     const events = matching.slice(0, this.maxEntries);
-    let blocked = 0, allowed = 0, exposed = 0;
+    let blocked = 0, allowed = 0, exposed = 0, other = 0;
     matching.forEach(e => {
       if (e.kind === 'Blocked') blocked++;
       else if (e.kind === 'Allowed') allowed++;
       else if (e.kind === 'Exposed') exposed++;
+      else if (e.kind === 'Other') other++;
     });
     this.stats.innerHTML = [
       ['MATCHING EVENTS', matching.length],
       ['BLOCKED', blocked],
+      ['OTHER PORTS', other],
       ['EXPOSED SERVICE HITS', exposed],
       ['ALLOWED · EXPLICIT LOGS', allowed]
     ].map(function(item) {
@@ -1340,8 +1354,9 @@ return view.extend({
       }
       .fw-shell .fw-stat:nth-child(1) strong { color: var(--mp-cyan) !important; }
       .fw-shell .fw-stat:nth-child(2) strong { color: var(--mp-pink) !important; }
-      .fw-shell .fw-stat:nth-child(3) strong { color: var(--mp-cyan) !important; }
-      .fw-shell .fw-stat:nth-child(4) strong { color: var(--mp-green) !important; }
+      .fw-shell .fw-stat:nth-child(3) strong { color: var(--mp-orange) !important; }
+      .fw-shell .fw-stat:nth-child(4) strong { color: var(--mp-cyan) !important; }
+      .fw-shell .fw-stat:nth-child(5) strong { color: var(--mp-green) !important; }
 
       .fw-shell .fw-toolbar {
         display: flex;
@@ -1561,6 +1576,7 @@ return view.extend({
       .fw-shell .fw-table tbody tr:nth-child(even) { background: #29262B !important; }
       .fw-shell .fw-table tbody tr:hover { background: #403B43 !important; }
       .fw-shell .fw-table tbody tr.fw-blocked { box-shadow: inset 3px 0 var(--mp-pink); }
+      .fw-shell .fw-table tbody tr.fw-other { box-shadow: inset 3px 0 var(--mp-orange); }
       .fw-shell .fw-table tbody tr.fw-observed { box-shadow: inset 3px 0 var(--mp-yellow); }
       .fw-shell .fw-table tbody tr.fw-allowed { box-shadow: inset 3px 0 var(--mp-green); }
       .fw-shell .fw-table tbody tr.fw-exposed { box-shadow: inset 3px 0 var(--mp-cyan); }
@@ -1625,6 +1641,11 @@ return view.extend({
         background: var(--mp-yellow) !important;
         border-color: #FFE69A !important;
       }
+      .fw-shell .fw-badge.other {
+        color: #2D2A2E !important;
+        background: var(--mp-orange) !important;
+        border-color: #FFC7A8 !important;
+      }
       .fw-shell .fw-badge.blocked,
       .fw-shell .fw-badge.danger {
         color: #2D2A2E !important;
@@ -1644,7 +1665,7 @@ return view.extend({
         outline-offset: 2px;
       }
       .fw-shell .fw-description { font-size: 15px !important; line-height: 1.6 !important; }
-      .fw-shell .fw-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+      .fw-shell .fw-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
       .fw-shell .fw-stat span { font-size: 13px !important; }
       .fw-shell .fw-stat strong { font-size: 28px !important; }
       .fw-shell .fw-primary-toolbar { align-items: stretch; gap: 10px; margin: 14px 0 8px; }
@@ -1704,6 +1725,7 @@ return view.extend({
     this.kind = E('select', {class: 'cbi-input-select', 'aria-label': _('Filter by verdict')}, [
       E('option', {value: 'all'}, _('All verdict types')),
       E('option', {value: 'blocked'}, _('Blocked only')),
+      E('option', {value: 'other'}, _('Other ports')),
       E('option', {value: 'exposed'}, _('Exposed service hits')),
       E('option', {value: 'observed'}, _('Other interface / unclassified')),
       E('option', {value: 'allowed'}, _('Allowed · explicit logs only'))
@@ -1791,7 +1813,7 @@ return view.extend({
       E('div', {class: 'fw-more-content'}, [
         E('section', {class: 'fw-settings-section fw-settings-watch'}, [
           E('h3', {}, _('WAN watch')),
-          E('p', {class: 'fw-muted'}, _('Choose the WAN device and the ports to log. Each source address gets its own log budget. A port that already has a firewall forward uses a smaller budget, so visitors there do not crowd out other hits. The watch never accepts or drops traffic.')),
+          E('p', {class: 'fw-muted'}, _('Choose the WAN device and the known ports to log at the full per-address budget. Every other WAN port is sampled at 2 lines per minute per address. Forwarded ports use a smaller budget. The watch never accepts or drops traffic.')),
           E('div', {class: 'fw-settings-actions'}, [
             E('button', {class: 'cbi-button cbi-button-action', click: () => this.openTrafficSettings()}, _('Edit WAN watch'))
           ]),
@@ -1834,7 +1856,7 @@ return view.extend({
     ]);
 
     const result = E('div', {class: 'fw-shell'}, [
-      E('p', {class: 'cbi-section-descr fw-description'}, _('Each row is one firewall event. WAN watchlist hits are Blocked unless the destination has an exposed-service label. Allowed requires an explicit ALLOW/ACCEPT log. GeoIP lookups stay local.')),
+      E('p', {class: 'cbi-section-descr fw-description'}, _('Each row is one firewall event. A known-port probe is Blocked when nothing allows or forwards it. Other is a low-rate sample of a port outside that list. Allowed requires an explicit ALLOW/ACCEPT log. GeoIP lookups stay local.')),
       this.stats,
       E('div', {class: 'fw-toolbar fw-primary-toolbar'}, [
         this.search, this.kind, this.proto, this.window,

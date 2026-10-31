@@ -16,6 +16,7 @@ test('router history keeps firewall lines in a tmpfs ring and drops other syslog
   const log = [
     'Oct 31 06:00:00 2026 router kernel: INFRA_PORT_HIT: IN=wan SRC=203.0.113.8 DST=192.0.2.1 PROTO=TCP DPT=22 SYN',
     'Oct 31 06:00:01 2026 router dnsmasq[1]: query[A] example.test from 192.168.1.2',
+    'Oct 31 06:00:04 2026 router kernel: INFRA_PORT_OTHER: IN=wan SRC=203.0.113.11 DST=192.0.2.1 PROTO=TCP DPT=25125 SYN',
     'Oct 31 06:00:02 2026 router kernel: DROP: IN=wan SRC=198.51.100.9 DST=192.0.2.1 PROTO=TCP DPT=443 SYN',
     'Oct 31 06:00:03 2026 router kernel: INFRA_PORT_HIT: IN=wan SRC=203.0.113.8 DST=192.0.2.1 PROTO=TCP DPT=22 SYN'
   ].join('\n') + '\n';
@@ -25,16 +26,17 @@ test('router history keeps firewall lines in a tmpfs ring and drops other syslog
     ...process.env,
     PATH: `${bin}:/usr/bin:/bin`,
     LOG_VIEWER_RING: ring,
-    LOG_VIEWER_RING_CAP: '2'
+    LOG_VIEWER_RING_CAP: '4'
   };
   try {
     const status = JSON.parse(execFileSync(helper, ['update'], {env, encoding: 'utf8'}));
     assert.equal(status.storage, 'tmpfs');
-    assert.equal(status.cap, 2);
-    assert.equal(status.count, 2);
+    assert.equal(status.cap, 4);
+    assert.equal(status.count, 4);
     const lines = fs.readFileSync(ring, 'utf8').trim().split('\n');
     assert.equal(lines.some(line => line.includes('dnsmasq')), false);
-    assert.equal(lines.filter(line => line.includes('INFRA_PORT_HIT')).length, 1);
+    assert.equal(lines.filter(line => line.includes('INFRA_PORT_HIT')).length, 2);
+    assert.equal(lines.some(line => line.includes('INFRA_PORT_OTHER:')), true);
     assert.equal(lines.some(line => line.includes('DROP:')), true);
 
     const cleared = JSON.parse(execFileSync(helper, ['clear'], {env, encoding: 'utf8'}));

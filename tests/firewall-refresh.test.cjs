@@ -71,6 +71,10 @@ test('an insight filter describes itself and settings are grouped by job', () =>
   assert.match(source, /fw-settings-history/);
   assert.match(source, /fw-settings-files/);
   assert.match(source, /handleSaveApply: null/);
+  assert.match(source, /Default deny/);
+  assert.match(source, /Not on the watch list/);
+  assert.match(source, /value: 'other'/);
+  assert.doesNotMatch(source, /WAN watchlist/);
   assert.match(source, /fw-primary-toolbar[\s\S]{0,500}this\.presets/);
   assert.doesNotMatch(source, /_\('Clear insight filters'\)/);
 });

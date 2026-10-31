@@ -13,16 +13,22 @@ test('ships the Flint4 default watchlist in UCI and the runtime fallback consist
   const fallback = watcher.match(/ports="([0-9 ]+)"/);
   assert.ok(fallback, 'runtime helper must have a safe fallback port list');
   assert.deepEqual(defaults, fallback[1].trim().split(/\s+/).map(Number));
-  assert.equal(defaults.length, 100);
+  assert.equal(defaults.length, 105);
+  for (const port of [7547, 8291, 8883, 10250, 51820])
+    assert.equal(defaults.includes(port), true, `default watch list includes ${port}`);
   assert.equal(new Set(defaults).size, defaults.length);
   assert.ok(defaults.every(port => port >= 1 && port <= 65535));
   assert.equal(defaults.includes(25125), false, 'arbitrary ports are opt-in via the UI');
 });
 
 test('watcher only logs TCP SYN and UDP matches, then returns traffic to normal firewall processing', () => {
-  assert.match(watcher, /-p tcp .*--syn -j "\$chain"/);
-  assert.match(watcher, /-p udp .* -j "\$chain"/);
-  assert.match(watcher, /-j LOG --log-prefix 'INFRA_PORT_HIT: '/);
+  assert.match(watcher, /-p tcp .*--syn -g "\$chain"/);
+  assert.match(watcher, /-p udp .* -g "\$chain"/);
+  assert.match(watcher, /-j LOG --log-prefix "\$prefix"/);
+  assert.match(watcher, /install_log_chain "\$LOG_CHAIN" reffix_scan 30\/minute 15 'INFRA_PORT_HIT: '/);
+  assert.match(watcher, /install_log_chain "\$OTHER_CHAIN" reffix_other 2\/minute 5 'INFRA_PORT_OTHER: '/);
+  assert.match(watcher, /-p tcp -m tcp --syn -j "\$OTHER_CHAIN"/);
+  assert.match(watcher, /-p udp -j "\$OTHER_CHAIN"/);
   assert.match(watcher, /-j RETURN/);
   assert.match(watcher, /--hashlimit-mode srcip/);
   assert.match(watcher, /--hashlimit-upto "\$rate"/);

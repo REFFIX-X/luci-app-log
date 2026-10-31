@@ -17,7 +17,7 @@ status() {
 
 is_firewall_line() {
   line="$1"
-  if printf '%s' "$line" | grep -q 'INFRA_PORT_HIT:'; then
+  if printf '%s' "$line" | grep -Eq 'INFRA_PORT_(HIT|OTHER):'; then
     return 0
   fi
   printf '%s' "$line" | grep -q 'SRC=' || return 1
