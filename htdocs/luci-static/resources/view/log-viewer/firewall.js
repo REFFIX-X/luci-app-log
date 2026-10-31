@@ -75,6 +75,26 @@ function insightFilterText(source, port, timeline) {
   if (timeline && timeline.start != null) parts.push('time bar');
   return parts.join(' · ');
 }
+
+function appendWatchPort(portsText, port) {
+  const portNumber = Number(port);
+  if (!Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535)
+    return {ok: false, reason: 'invalid'};
+  const existing = [];
+  for (const token of String(portsText || '').split(/[\s,]+/)) {
+    if (!token) continue;
+    if (!/^\d{1,5}$/.test(token)) return {ok: false, reason: 'invalid'};
+    const value = Number(token);
+    if (value < 1 || value > 65535) return {ok: false, reason: 'invalid'};
+    if (!existing.includes(value)) existing.push(value);
+  }
+  if (existing.includes(portNumber))
+    return {ok: true, changed: false, ports: existing.join(',')};
+  if (existing.length >= 256)
+    return {ok: false, reason: 'full'};
+  existing.push(portNumber);
+  return {ok: true, changed: true, ports: existing.join(',')};
+}
 const SERVICES = {
   21:'FTP',22:'SSH',23:'Telnet',25:'SMTP',53:'DNS',69:'TFTP',80:'HTTP',
   110:'POP3',123:'NTP',135:'MS RPC',139:'NetBIOS',143:'IMAP',161:'SNMP',
@@ -841,6 +861,43 @@ return view.extend({
     ]);
   },
 
+  addWatchPort: async function(port) {
+    await this.loadWatchConfig(true);
+    const config = this.watchConfig;
+    if (!config) {
+      ui.addNotification(null, E('p', _('WAN watch status is unavailable, so the port was not added.')), 'error');
+      return;
+    }
+    const next = appendWatchPort(config.ports || '', port);
+    if (!next.ok) {
+      ui.addNotification(null, E('p', next.reason === 'full'
+        ? _('The watch list already has 256 ports.')
+        : _('That port cannot be added.')), 'error');
+      return;
+    }
+    if (!next.changed) {
+      ui.addNotification(null, E('p', _('That port is already on the known list.')), 'info');
+      ui.hideModal();
+      return;
+    }
+    try {
+      const enabled = config.enabled === false || config.enabled === 0 ? '0' : '1';
+      const raw = await fs.exec_direct('/usr/sbin/infra-port-watch-config', [
+        'set', enabled, config.wan_interface || 'auto', next.ports
+      ], 'text');
+      this.watchConfig = JSON.parse(raw || '{}');
+      this.watchConfigLoaded = true;
+      this.watchConfigSyncedAt = Date.now();
+    }
+    catch (e) {
+      ui.addNotification(null, E('p', _('Could not add the port: ') + (e.message || e)), 'error');
+      return;
+    }
+    this.renderWatchStatus();
+    ui.hideModal();
+    ui.addNotification(null, E('p', _('Port ') + port + _(' is on the known list. Later hits use the full per-address budget.')), 'info');
+  },
+
   getTimeWindowMs: function() {
     return ({
       '5m': 5 * 60 * 1000,
@@ -1347,7 +1404,7 @@ return view.extend({
         display: block;
         margin-top: 4px;
         color: var(--mp-fg) !important;
-        font-size: 27px !important;
+        font-size: 22px !important;
         font-weight: 850;
         line-height: 1.25;
         font-variant-numeric: tabular-nums;
@@ -1439,7 +1496,7 @@ return view.extend({
       .fw-shell .fw-insight h3 {
         margin: 0 0 10px !important;
         color: var(--mp-fg) !important;
-        font-size: 15px !important;
+        font-size: 13px !important;
         font-weight: 850 !important;
         line-height: 1.35;
         letter-spacing: .01em;
@@ -1664,49 +1721,49 @@ return view.extend({
         outline: 2px solid var(--mp-purple) !important;
         outline-offset: 2px;
       }
-      .fw-shell .fw-description { font-size: 15px !important; line-height: 1.6 !important; }
+      .fw-shell .fw-description { font-size: 13px !important; line-height: 1.5 !important; }
       .fw-shell .fw-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
-      .fw-shell .fw-stat span { font-size: 13px !important; }
-      .fw-shell .fw-stat strong { font-size: 28px !important; }
+      .fw-shell .fw-stat span { font-size: 12px !important; }
+      .fw-shell .fw-stat strong { font-size: 22px !important; }
       .fw-shell .fw-primary-toolbar { align-items: stretch; gap: 10px; margin: 14px 0 8px; }
       .fw-shell .fw-primary-toolbar input,
-      .fw-shell .fw-primary-toolbar select { min-height: 44px; font-size: 15px !important; }
+      .fw-shell .fw-primary-toolbar select { min-height: 36px; font-size: 13px !important; }
       .fw-shell .fw-primary-toolbar input { flex: 2 1 240px; }
       .fw-shell .fw-primary-toolbar select { flex: 1 1 145px; }
       .fw-shell .fw-primary-toolbar button,
       .fw-shell .fw-secondary-toolbar button,
       .fw-shell .fw-history-toolbar button,
-      .fw-shell .fw-file-import { min-height: 42px !important; padding: 9px 14px !important; font-size: 14px !important; }
-      .fw-shell .fw-results-meta { display: flex; flex-wrap: wrap; gap: 5px 16px; margin: 8px 0 12px; color: var(--mp-muted); font-size: 14px !important; line-height: 1.5; }
-      .fw-shell .fw-results-meta .right { color: var(--mp-fg) !important; font-size: 14px !important; }
+      .fw-shell .fw-file-import { min-height: 36px !important; padding: 7px 12px !important; font-size: 13px !important; }
+      .fw-shell .fw-results-meta { display: flex; flex-wrap: wrap; gap: 5px 16px; margin: 8px 0 12px; color: var(--mp-muted); font-size: 13px !important; line-height: 1.5; }
+      .fw-shell .fw-results-meta .right { color: var(--mp-fg) !important; font-size: 13px !important; }
       .fw-shell .fw-more-actions { margin: 12px 0; border: 1px solid var(--mp-border); border-radius: 8px; background: var(--mp-panel); }
-      .fw-shell .fw-more-actions > summary { padding: 12px 14px; cursor: pointer; font-size: 15px; font-weight: 750; }
+      .fw-shell .fw-more-actions > summary { padding: 10px 12px; cursor: pointer; font-size: 13px; font-weight: 750; }
       .fw-shell .fw-more-content { display: grid; gap: 0; padding: 0 14px 8px; }
       .fw-shell .fw-settings-section { display: grid; gap: 8px; padding: 14px 0; border-top: 1px solid var(--mp-border); }
-      .fw-shell .fw-settings-section h3 { margin: 0; font-size: 15px; font-weight: 750; }
+      .fw-shell .fw-settings-section h3 { margin: 0; font-size: 13px; font-weight: 750; }
       .fw-shell .fw-settings-section p { margin: 0; }
       .fw-shell .fw-settings-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-      .fw-shell .fw-settings-actions select { min-width: 220px; min-height: 42px; font-size: 14px !important; }
+      .fw-shell .fw-settings-actions select { min-width: 220px; min-height: 36px; font-size: 13px !important; }
       .fw-shell .fw-insight-clear[hidden] { display: none !important; }
       .fw-shell .fw-status-row,
       .fw-shell .fw-history-toolbar,
-      .fw-shell .fw-privacy { font-size: 14px !important; line-height: 1.5; }
-      .fw-shell .fw-history-control select { min-height: 42px; font-size: 14px !important; }
-      .fw-shell .fw-insights-disclosure > summary { font-size: 15px; }
-      .fw-shell .fw-table { min-width: 960px; font-size: 15px !important; }
-      .fw-shell .fw-table thead th { padding: 13px 12px !important; font-size: 14px !important; }
-      .fw-shell .fw-table td { padding: 13px 12px !important; font-size: 15px !important; line-height: 1.55 !important; }
-      .fw-shell .fw-time { min-width: 150px; font-size: 14px !important; }
+      .fw-shell .fw-privacy { font-size: 13px !important; line-height: 1.5; }
+      .fw-shell .fw-history-control select { min-height: 36px; font-size: 13px !important; }
+      .fw-shell .fw-insights-disclosure > summary { font-size: 13px; }
+      .fw-shell .fw-table { min-width: 960px; font-size: 13px !important; }
+      .fw-shell .fw-table thead th { padding: 10px 10px !important; font-size: 12px !important; }
+      .fw-shell .fw-table td { padding: 9px 10px !important; font-size: 13px !important; line-height: 1.45 !important; }
+      .fw-shell .fw-time { min-width: 150px; font-size: 12px !important; }
       .fw-shell .fw-source { min-width: 210px; }
-      .fw-shell .fw-source code { font-size: 14px !important; }
+      .fw-shell .fw-source code { font-size: 13px !important; }
       .fw-shell .fw-source small,
       .fw-shell .fw-detail small,
-      .fw-shell .fw-table td:nth-child(4) small { font-size: 13px !important; }
-      .fw-shell .fw-table code { font-size: 14px !important; }
-      .fw-shell .fw-event-policy { font-size: 13px !important; }
-      .fw-shell .fw-badge { padding: 5px 9px !important; font-size: 14px !important; }
-      .fw-shell .fw-event-details { min-height: 38px !important; padding: 7px 12px !important; font-size: 14px !important; }
-      .fw-shell .fw-load-more { min-height: 44px !important; margin-top: 12px; font-size: 15px !important; }
+      .fw-shell .fw-table td:nth-child(4) small { font-size: 12px !important; }
+      .fw-shell .fw-table code { font-size: 13px !important; }
+      .fw-shell .fw-event-policy { font-size: 12px !important; }
+      .fw-shell .fw-badge { padding: 3px 7px !important; font-size: 12px !important; }
+      .fw-shell .fw-event-details { min-height: 32px !important; padding: 5px 10px !important; font-size: 13px !important; }
+      .fw-shell .fw-load-more { min-height: 36px !important; margin-top: 12px; font-size: 13px !important; }
       @media (max-width: 1200px) {
         .fw-shell .fw-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       }
@@ -1972,13 +2029,19 @@ return view.extend({
       ['Log marker', event.marker], ['Event prefix', event.prefix],
       ['Policy label', event.policyLabel], ['Policy note', event.policyNote]
     ];
+    const actions = [E('button', {class: 'cbi-button cbi-button-action important', click: ui.hideModal}, _('Close'))];
+    const destinationPort = Number(event.dport);
+    if (event.kind === 'Other' && Number.isInteger(destinationPort) && destinationPort >= 1 && destinationPort <= 65535)
+      actions.unshift(E('button', {class: 'cbi-button', click: () => {
+        this.addWatchPort(destinationPort).catch(e => ui.addNotification(null, E('p', e.message || e), 'error'));
+      }}, _('Log this port at the full budget')));
     ui.showModal(_('Firewall event details'), [
       E('dl', {class: 'fw-event-meta'}, rows.flatMap(row => [
         E('dt', {}, _(row[0])), E('dd', {}, String(row[1] == null || row[1] === '' ? '—' : row[1]))
       ])),
       E('h3', {}, _('Original log line')),
       E('pre', {class: 'fw-raw-log'}, event.rawLine || '')
-    ], [E('button', {class: 'cbi-button cbi-button-action important', click: ui.hideModal}, _('Close'))]);
+    ], actions);
   },
 
   exportCSV: function(allLoaded) {

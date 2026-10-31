@@ -78,3 +78,25 @@ test('an insight filter describes itself and settings are grouped by job', () =>
   assert.match(source, /fw-primary-toolbar[\s\S]{0,500}this\.presets/);
   assert.doesNotMatch(source, /_\('Clear insight filters'\)/);
 });
+
+test('the log type is one step smaller and an Other row can join the known list', () => {
+  const appendWatchPort = extract('appendWatchPort');
+  assert.deepEqual(appendWatchPort('22,80', 443), {ok: true, changed: true, ports: '22,80,443'});
+  assert.deepEqual(appendWatchPort('22, 80', 22), {ok: true, changed: false, ports: '22,80'});
+  assert.deepEqual(appendWatchPort('', 25125), {ok: true, changed: true, ports: '25125'});
+  assert.equal(appendWatchPort('22', 0).ok, false);
+  assert.equal(appendWatchPort('22', 65536).ok, false);
+  const full = Array.from({length: 256}, (_, i) => i + 1).join(',');
+  assert.deepEqual(appendWatchPort(full, 700), {ok: false, reason: 'full'});
+  assert.equal(appendWatchPort(full, 22).changed, false);
+
+  assert.match(source, /position: sticky/);
+  assert.match(source, /\.fw-table thead th \{[\s\S]*background: #403A42 !important/);
+  assert.match(source, /\.fw-shell \.fw-table \{ min-width: 960px; font-size: 13px !important; \}/);
+  assert.match(source, /\.fw-shell \.fw-stat strong \{ font-size: 22px !important; \}/);
+  assert.match(source, /\.fw-primary-toolbar input,\n      \.fw-shell \.fw-primary-toolbar select \{ min-height: 36px; font-size: 13px !important; \}/);
+  assert.doesNotMatch(source, /font-size: 15px/);
+  assert.doesNotMatch(source, /font-size: 28px/);
+  assert.match(source, /Log this port at the full budget/);
+  assert.match(source, /event\.kind === 'Other'/);
+});
