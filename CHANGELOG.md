@@ -1,5 +1,10 @@
 # Changelog
 
+## v3.2.1 (2026-10-31)
+
+- Drop the Firewall Log type one step: table and fields are 13px, buttons are 13px, and the summary numbers are 22px. Column titles stay pinned while the log scrolls.
+- Add **Log this port at the full budget** to the details of an Other event. It appends that destination port to the known list and restarts the watch. A port already on the list is left as it is, and a 257th port is refused.
+
 ## v3.2.0 (2026-10-31)
 
 - Give each source address its own WAN log budget: 30 per minute after a burst of 15 on a known port, 4 per minute after a burst of 4 when that port is also an enabled firewall forward, and 2 per minute after a burst of 5 for every other port. Listed ports use iptables goto so they are not logged again by the other-port chain. If hashlimit is missing, the same rates fall back to one shared limit. The watch still only logs IPv4 TCP SYN and UDP, then returns the packet.

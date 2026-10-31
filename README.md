@@ -23,7 +23,7 @@ uclient-fetch -qO- https://raw.githubusercontent.com/REFFIX-X/luci-app-log/main/
 
 The installer accepts OpenWrt 25.12 and `SNAPSHOT:mediatek/filogic` when `apk` is installed. Release assets are built for `aarch64_cortex-a53`. A generic `aarch64` arch is accepted only when the target is `mediatek/filogic`.
 
-It installs two packages, `luci-app-log-viewer` and `libmaxminddb` (this build includes `mmdblookup`). Checksums are verified before `apk add`. The script tries the `package-assets` mirror first and, if that download or checksum check fails, uses the GitHub release named by `VERSION_FALLBACK` in `install-online.sh` (currently v3.2.0). A checksum mismatch on the release stops installation. It then runs `/usr/bin/flint4-geoip-update` and restarts `rpcd`.
+It installs two packages, `luci-app-log-viewer` and `libmaxminddb` (this build includes `mmdblookup`). Checksums are verified before `apk add`. The script tries the `package-assets` mirror first and, if that download or checksum check fails, uses the GitHub release named by `VERSION_FALLBACK` in `install-online.sh` (currently v3.2.1). A checksum mismatch on the release stops installation. It then runs `/usr/bin/flint4-geoip-update` and restarts `rpcd`.
 
 After it finishes, open **Status → Firewall Log**. Log in again if the menu entry is missing; the ACL is loaded when `rpcd` restarts.
 
