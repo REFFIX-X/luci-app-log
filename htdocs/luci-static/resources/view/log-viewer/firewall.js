@@ -6,6 +6,75 @@
 
 const MAX_LINES = 1500;
 const PAGE_SIZE = 100;
+const WATCH_CONFIG_TTL_MS = 60000;
+const GEO_MEMORY_MAX = 400;
+const GEO_MEMORY_MS = 7 * 86400000;
+const GEO_BATCH_BYTES = 900;
+
+function geoBatchChunks(addresses, maxArgsBytes) {
+  const chunks = [];
+  let batch = [];
+  let bytes = '--batch'.length;
+  (addresses || []).forEach(ip => {
+    const add = 1 + String(ip).length;
+    if (batch.length && bytes + add > maxArgsBytes) {
+      chunks.push(batch);
+      batch = [];
+      bytes = '--batch'.length;
+    }
+    batch.push(String(ip));
+    bytes += add;
+  });
+  if (batch.length) chunks.push(batch);
+  return chunks;
+}
+
+function readGeoMemory(raw, now, maxAgeMs) {
+  let data;
+  try { data = JSON.parse(raw || ''); }
+  catch (e) { return {}; }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return {};
+  const fresh = {};
+  Object.keys(data).forEach(ip => {
+    const row = data[ip];
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return;
+    const at = Number(row.at || 0);
+    if (!(at > 0) || now - at > maxAgeMs) return;
+    fresh[ip] = {
+      country_code: String(row.country_code || ''),
+      country_name: String(row.country_name || ''),
+      asn_organization: String(row.asn_organization || ''),
+      at: at
+    };
+  });
+  return fresh;
+}
+
+function writeGeoMemory(store, ip, record, now, maxEntries) {
+  const next = Object.assign({}, store);
+  next[ip] = {
+    country_code: record && record.country_code || '',
+    country_name: record && record.country_name || '',
+    asn_organization: record && record.asn_organization || '',
+    at: now
+  };
+  const keys = Object.keys(next).sort((a, b) => (next[a].at || 0) - (next[b].at || 0));
+  while (keys.length > maxEntries) delete next[keys.shift()];
+  return next;
+}
+
+function watchConfigIsFresh(syncedAt, now, ttlMs) {
+  const at = Number(syncedAt) || 0;
+  return at > 0 && Number(now) - at < Number(ttlMs);
+}
+
+function insightFilterText(source, port, timeline) {
+  const parts = [];
+  if (source) parts.push(String(source));
+  if (port != null && port !== '') parts.push('port ' + port);
+  if (timeline && timeline.start != null) parts.push('time bar');
+  return parts.join(' · ');
+}
 const SERVICES = {
   21:'FTP',22:'SSH',23:'Telnet',25:'SMTP',53:'DNS',69:'TFTP',80:'HTTP',
   110:'POP3',123:'NTP',135:'MS RPC',139:'NetBIOS',143:'IMAP',161:'SNMP',
@@ -16,11 +85,11 @@ const SERVICES = {
   3306:'MySQL',3389:'RDP',4500:'IPsec NAT-T',5000:'Web/App',5001:'HTTPS/App',
   5060:'SIP',5061:'SIP TLS',5432:'PostgreSQL',5555:'ADB',5900:'VNC',
   5985:'WinRM',5986:'WinRM TLS',6379:'Redis',6443:'Kubernetes API',
-  6667:'IRC',7001:'WebLogic',7443:'HTTPS Alt',7777:'Game/Service',
+  6667:'IRC',7001:'WebLogic',7443:'HTTPS Alt',7547:'TR-069',7777:'Game/Service',
   8000:'HTTP Alt',8008:'HTTP Alt',8080:'HTTP Proxy',8081:'HTTP Alt',
-  8088:'HTTP Alt',8443:'HTTPS Alt',8888:'HTTP Alt',9000:'Web/App',
+  8088:'HTTP Alt',8291:'MikroTik',8443:'HTTPS Alt',8883:'MQTT TLS',8888:'HTTP Alt',9000:'Web/App',
   9042:'Cassandra',9090:'Web/App',9200:'Elasticsearch',9300:'Elasticsearch',
-  9418:'Git',10000:'Webmin',11211:'Memcached',27017:'MongoDB'
+  9418:'Git',10000:'Webmin',10250:'Kubelet',11211:'Memcached',27017:'MongoDB',51820:'WireGuard'
 };
 
 function esc(value) {
@@ -83,6 +152,7 @@ function formatLogreadTimestamp(epochMs, routerOffset) {
 }
 
 function parseLine(line, index, routerOffset) {
+  const otherHit = line.includes('INFRA_PORT_OTHER:');
   const infraHit = line.includes('INFRA_PORT_HIT:');
   const hasPacketTuple = /SRC=\S+.*DPT=\d+/.test(line);
   const blockMarker = /\b(?:DROP|REJECT)\b/i.test(line) ||
@@ -94,7 +164,11 @@ function parseLine(line, index, routerOffset) {
 
   let prefix = '';
   let kind = '';
-  if (infraHit) {
+  if (otherHit) {
+    prefix = 'INFRA_PORT_OTHER';
+    kind = 'Other';
+  }
+  else if (infraHit) {
     prefix = 'INFRA_PORT_HIT';
     kind = 'Blocked';
   }
@@ -206,6 +280,9 @@ function historyTransactionDone(transaction) {
 }
 
 return view.extend({
+  handleSave: null,
+  handleSaveApply: null,
+  handleReset: null,
   viewName: 'firewall',
   title: _('Firewall Log'),
   events: [],
@@ -237,6 +314,11 @@ return view.extend({
   sourceLineCount: 0,
   logReadLimit: MAX_LINES,
   watchConfigRequest: 0,
+  watchConfigSyncedAt: 0,
+  geoMemory: {},
+  routerHistorySyncedAt: 0,
+  routerHistoryStatus: null,
+  lastRingData: null,
   lastCollectedAt: 0,
   lastRawData: null,
   geoStatus: null,
@@ -305,7 +387,8 @@ return view.extend({
   },
 
   loadWatchConfig: async function(force) {
-    if (this.watchConfigLoaded && !force) return;
+    if (!force && this.watchConfigLoaded && watchConfigIsFresh(this.watchConfigSyncedAt, Date.now(), WATCH_CONFIG_TTL_MS))
+      return;
     const request = ++this.watchConfigRequest;
     this.watchConfigLoaded = true;
     try {
@@ -314,10 +397,12 @@ return view.extend({
       this.watchConfig = JSON.parse(raw || '{}');
       this.routerClockAtSync = Number(this.watchConfig.router_time || 0) * 1000;
       this.routerClockSyncedAt = Date.now();
+      this.watchConfigSyncedAt = Date.now();
     }
     catch (e) {
       if (request !== this.watchConfigRequest) return;
       this.watchConfig = null;
+      this.watchConfigSyncedAt = Date.now();
     }
   },
 
@@ -349,26 +434,33 @@ return view.extend({
   },
 
   applyTrafficContext: function(event) {
-    if (event.prefix !== 'INFRA_PORT_HIT') return event;
+    const other = event.prefix === 'INFRA_PORT_OTHER';
+    if (event.prefix !== 'INFRA_PORT_HIT' && !other) return event;
 
-    event.kind = event.baseKind || 'Blocked';
-    event.policyLabel = event.basePolicyLabel || 'WAN watchlist';
+    event.kind = event.baseKind || (other ? 'Other' : 'Blocked');
+    event.policyLabel = event.basePolicyLabel || (other ? 'Not on the watch list' : 'Default deny');
     event.policyNote = event.basePolicyNote || '';
 
     const iface = String(event.iface || '').toLowerCase();
     const onWan = !this.wanInterfaces.length || this.wanInterfaces.includes(iface);
     if (!onWan) {
       event.kind = 'Observed';
-      event.policyNote = 'Watchlist hit on an interface not configured as WAN. Set the WAN interface list to classify it.';
+      event.policyNote = 'Probe on an interface not configured as WAN. Set the WAN interface to classify it.';
     }
     else if (this.exposedPorts[event.dport]) {
       event.kind = 'Exposed';
       event.policyLabel = this.exposedPorts[event.dport];
-      event.policyNote = 'Hit matches a configured exposed service. The watchlist line alone does not confirm whether the forward accepted it.';
+      event.policyNote = 'Hit matches a configured exposed service. This line does not confirm whether the forward accepted it.';
+    }
+    else if (other) {
+      event.kind = 'Other';
+      if (!event.basePolicyLabel) event.policyLabel = 'Not on the watch list';
+      event.policyNote = 'Low-rate sample of a port outside the watch list. Default policy drops it unless an allow or forward applies.';
     }
     else {
       event.kind = 'Blocked';
-      event.policyNote = 'WAN watchlist hit. Default-deny blocks this port unless an allow rule or port forward applies.';
+      if (!event.basePolicyLabel) event.policyLabel = 'Default deny';
+      event.policyNote = 'No allow or forward for this port. The watch logged the probe; the firewall default policy drops it.';
     }
     return event;
   },
@@ -379,17 +471,19 @@ return view.extend({
       const presets = JSON.parse(localStorage.getItem('reffix-log-viewer.filters') || '[]');
       this.filterPresets = Array.isArray(presets) ? presets.filter(p =>
         p && typeof p.name === 'string' && typeof p.query === 'string' &&
-        ['all', 'blocked', 'observed', 'allowed', 'exposed'].includes(p.kind) &&
+        ['all', 'blocked', 'other', 'observed', 'allowed', 'exposed'].includes(p.kind) &&
         ['all', 'tcp', 'udp'].includes(p.proto) &&
         ['all', '5m', '15m', '1h', '6h', '24h'].includes(p.window)
       ).slice(0, 20) : [];
       this.historyRetention = ['off', '1', '7', '30'].includes(localStorage.getItem('reffix-log-viewer.history-days'))
         ? localStorage.getItem('reffix-log-viewer.history-days') : 'off';
+      this.geoMemory = readGeoMemory(localStorage.getItem('reffix-log-viewer.geo-cache'), Date.now(), GEO_MEMORY_MS);
     }
     catch (e) {
       this.showReputation = false;
       this.filterPresets = [];
       this.historyRetention = 'off';
+      this.geoMemory = {};
     }
   },
 
@@ -410,6 +504,7 @@ return view.extend({
       localStorage.setItem('reffix-log-viewer.filters', JSON.stringify(this.filterPresets));
       this.renderPresetOptions();
       this.presets.value = preset.name;
+      if (this.deletePresetButton) this.deletePresetButton.disabled = false;
     }
     catch (e) {
       ui.addNotification(null, E('p', _('Unable to save filter presets in this browser.')), 'warning');
@@ -418,7 +513,7 @@ return view.extend({
 
   renderPresetOptions: function() {
     if (!this.presets) return;
-    this.presets.replaceChildren(E('option', {value: ''}, _('Saved filters')));
+    this.presets.replaceChildren(E('option', {value: ''}, _('Choose a saved filter')));
     this.filterPresets.forEach(p => this.presets.appendChild(E('option', {value: p.name}, p.name)));
   },
 
@@ -443,6 +538,7 @@ return view.extend({
     }
     catch (e) {}
     this.renderPresetOptions();
+    if (this.deletePresetButton) this.deletePresetButton.disabled = true;
   },
 
   loadGeoStatus: async function() {
@@ -464,8 +560,8 @@ return view.extend({
       event.policyLabel = String(rule.label || marker);
       event.policyNote = String(rule.note || '');
     }
-    if (marker === 'INFRA_PORT_HIT' && /logging-only match|does not by itself block/i.test(event.policyNote || ''))
-      event.policyNote = 'WAN watchlist hit. Default-deny blocks this port unless an allow rule or port forward applies.';
+    if ((marker === 'INFRA_PORT_HIT' || marker === 'INFRA_PORT_OTHER') && /logging-only match|does not by itself block/i.test(event.policyNote || ''))
+      event.policyNote = 'No allow or forward for this port. The watch logged the probe; the firewall default policy drops it.';
     event.baseKind = event.kind;
     event.basePolicyLabel = event.policyLabel;
     event.basePolicyNote = event.policyNote;
@@ -586,7 +682,7 @@ return view.extend({
       }
       const presets = Array.isArray(browser.filterPresets) ? browser.filterPresets.filter(p =>
         p && typeof p.name === 'string' && typeof p.query === 'string' &&
-        ['all', 'blocked', 'observed', 'allowed', 'exposed'].includes(p.kind) &&
+        ['all', 'blocked', 'other', 'observed', 'allowed', 'exposed'].includes(p.kind) &&
         ['all', 'tcp', 'udp'].includes(p.proto) && ['all', '5m', '15m', '1h', '6h', '24h'].includes(p.window)
       ).slice(0, 20) : [];
       const watcher = data.watcher;
@@ -611,6 +707,7 @@ return view.extend({
               const raw = await fs.exec_direct('/usr/sbin/infra-port-watch-config', ['set', watcher.enabled ? '1' : '0', watcher.wan_interface, watcher.ports], 'text');
               this.watchConfig = JSON.parse(raw || '{}');
               this.watchConfigLoaded = true;
+              this.watchConfigSyncedAt = Date.now();
             }
           }
           catch (e) { ui.addNotification(null, E('p', _('Router settings were not applied: ') + (e.message || e)), 'error'); return; }
@@ -706,7 +803,7 @@ return view.extend({
     const ports = E('textarea', {class: 'cbi-input-text', rows: 6, placeholder: _('8096 = Jellyfin\n8920 = Jellyfin HTTPS')});
     ports.value = Object.entries(this.exposedPorts).map(([port, label]) => port + ' = ' + label).join('\n');
     ui.showModal(_('WAN interface and exposed services'), [
-      E('p', {class: 'cbi-section-descr'}, _('The watch rule logs matching TCP SYN and UDP probes only; it never accepts or drops traffic. Auto resolves the logical WAN device. Watch settings are saved on this router; service labels below are saved in this browser.')),
+      E('p', {class: 'cbi-section-descr'}, _('The watch logs matching TCP SYN and UDP probes only. It never accepts or drops traffic. Each source address has its own log budget, and forwarded ports use a smaller one. Auto resolves the logical WAN device. Watch settings are saved on this router; service labels below are saved in this browser.')),
       E('label', {class: 'fw-settings-field fw-watch-toggle'}, [watching, E('span', {}, _('Enable WAN port watch'))]),
       E('label', {class: 'fw-settings-field'}, [E('span', {}, _('WAN interface (auto or device name shown in IN=)')), interfaces]),
       E('label', {class: 'fw-settings-field'}, [E('span', {}, _('Ports to log (1–65535; comma or whitespace separated; up to 256)')), watchPorts]),
@@ -721,6 +818,7 @@ return view.extend({
             ], 'text');
             this.watchConfig = JSON.parse(raw || '{}');
             this.watchConfigLoaded = true;
+            this.watchConfigSyncedAt = Date.now();
           }
           catch (e) {
             ui.addNotification(null, E('p', _('Could not apply WAN watch settings: ') + (e.message || e)), 'error');
@@ -892,48 +990,82 @@ return view.extend({
       '<div class="fw-insight"><h3>Top ASNs</h3>' + topAsns + '</div>' +
       '<div class="fw-insight"><h3>Scan / burst signals</h3><p class="fw-muted">Heuristic only: 8+ ports or 25+ events from one public source.</p>' + scanHtml + '</div>' +
       '<div class="fw-insight fw-insight-policy"><h3>Policy context</h3><p class="fw-muted">' + esc(policyNotes) + '</p>' +
-      '<p class="fw-muted">WAN watchlist hits are shown as Blocked under the default-deny policy. Explicit allow and port-forward rules can create exceptions; Allowed appears only when an allow rule logs it.</p></div>';
+      '<p class="fw-muted">A known-port probe is Blocked when nothing allows or forwards it. Other is a low-rate sample of a port outside that list. Allowed appears only when an allow rule logs it.</p></div>';
   },
 
 
 
-  lookupGeo: async function(ip) {
-    if (!isPublic(ip)) return {};
-    if (Object.prototype.hasOwnProperty.call(this.geoCache, ip) &&
-        (Object.keys(this.geoCache[ip]).length || Date.now() - (this.geoCacheAt[ip] || 0) < 5 * 60 * 1000))
-      return this.geoCache[ip];
-    if (this.geoLookupInFlight.has(ip)) return this.geoLookupInFlight.get(ip);
-    const lookup = (async () => {
-      try {
-        const raw = await fs.exec_direct('/usr/bin/flint4-geoip', ['--json', ip], 'text');
-        const data = JSON.parse(raw || '{}');
-        this.geoCache[ip] = data.error ? {} : data;
-        this.geoCacheAt[ip] = Date.now();
-        return this.geoCache[ip];
-      }
-      catch (e) {
-        this.geoCache[ip] = {};
-        this.geoCacheAt[ip] = Date.now();
-        return {};
-      }
-      finally {
-        this.geoLookupInFlight.delete(ip);
-      }
-    })();
-    this.geoLookupInFlight.set(ip, lookup);
-    return lookup;
+  rememberGeo: function(ip, record) {
+    const hit = record && (record.country_code || record.country_name || record.asn_organization);
+    this.geoCache[ip] = hit ? record : (record || {});
+    this.geoCacheAt[ip] = Date.now();
+    if (!hit) return;
+    this.geoMemory = writeGeoMemory(this.geoMemory, ip, record, Date.now(), GEO_MEMORY_MAX);
+    try { localStorage.setItem('reffix-log-viewer.geo-cache', JSON.stringify(this.geoMemory)); }
+    catch (e) {}
   },
 
   enrich: async function(events) {
     const addresses = [...new Set(events.map(e => e.source).filter(isPublic))].slice(0, 60);
-    for (let i = 0; i < addresses.length; i += 6)
-      await Promise.all(addresses.slice(i, i + 6).map(ip => this.lookupGeo(ip)));
+    const pending = [];
+    addresses.forEach(ip => {
+      const known = this.geoMemory[ip];
+      if (known && (known.country_code || known.country_name || known.asn_organization)) {
+        this.geoCache[ip] = known;
+        this.geoCacheAt[ip] = known.at || Date.now();
+        return;
+      }
+      if (Object.prototype.hasOwnProperty.call(this.geoCache, ip) &&
+          (Object.keys(this.geoCache[ip]).length || Date.now() - (this.geoCacheAt[ip] || 0) < 5 * 60 * 1000))
+        return;
+      pending.push(ip);
+    });
+    const chunks = geoBatchChunks(pending, GEO_BATCH_BYTES);
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      try {
+        const raw = await fs.exec_direct('/usr/bin/flint4-geoip', ['--batch'].concat(chunk), 'text');
+        const data = JSON.parse(raw || '{}');
+        chunk.forEach(ip => {
+          const row = data[ip] && !data[ip].error ? data[ip] : {};
+          this.rememberGeo(ip, row);
+        });
+      }
+      catch (e) {
+        chunk.forEach(ip => this.rememberGeo(ip, {}));
+      }
+    }
+  },
+
+  readRouterRing: async function() {
+    if (!watchConfigIsFresh(this.routerHistorySyncedAt, Date.now(), 20000)) {
+      try {
+        const raw = await fs.exec_direct('/usr/sbin/log-viewer-history', ['update'], 'text');
+        this.routerHistoryStatus = JSON.parse(raw || '{}');
+      }
+      catch (e) {
+        this.routerHistoryStatus = null;
+      }
+      this.routerHistorySyncedAt = Date.now();
+    }
+    try { return await fs.read('/tmp/log-viewer/events.ring'); }
+    catch (e) { return ''; }
+  },
+
+  clearRouterHistory: async function() {
+    const raw = await fs.exec_direct('/usr/sbin/log-viewer-history', ['clear'], 'text');
+    this.routerHistoryStatus = JSON.parse(raw || '{}');
+    this.routerHistorySyncedAt = Date.now();
+    this.lastRingData = null;
+    if (this.routerHistoryText)
+      this.routerHistoryText.textContent = _('Router history cleared. New firewall lines are collected on the next check.');
+    this.refreshEvents().catch(() => {});
   },
 
   refreshEvents: async function() {
     const generation = ++this.refreshGeneration;
     await this.loadPolicyRules();
-    await this.loadWatchConfig(true);
+    await this.loadWatchConfig(false);
     this.loadTrafficContext();
     const raw = await this.getLogData();
     if (generation !== this.refreshGeneration) return;
@@ -952,6 +1084,15 @@ return view.extend({
       this.historyNeedsReload = true;
     }
     this.liveEvents.forEach(event => this.applyTrafficContext(event));
+    const ringText = await this.readRouterRing();
+    if (generation !== this.refreshGeneration) return;
+    const ringChanged = ringText !== this.lastRingData;
+    this.lastRingData = ringText;
+    const ringOffset = this.watchConfig && this.watchConfig.router_offset;
+    const ringEvents = String(ringText || '').split('\n').filter(Boolean)
+      .map((line, index) => parseLine(line, index + 1, ringOffset))
+      .filter(Boolean)
+      .map(event => this.applyTrafficContext(this.applyPolicy(event)));
     if (this.historyRetention !== 'off' && (changed || this.historyNeedsReload)) {
       try {
         const historyDelta = changed ? this.newLiveEvents : (this.historySeedPending ? this.liveEvents : []);
@@ -985,14 +1126,29 @@ return view.extend({
       }
     }
     else this.events = this.liveEvents;
-    if (this.historyRetention === 'off') this.historyStatusText.textContent = _('Browser-local history is off · router buffer only');
+    if (ringEvents.length) {
+      const merged = new Map();
+      ringEvents.concat(this.events).forEach((event, index) => {
+        if (!event || !event.rawLine) return;
+        event.id = index + 1;
+        merged.set(event.rawLine, event);
+      });
+      this.events = [...merged.values()].sort((a, b) => (b.timestampMs || 0) - (a.timestampMs || 0)).slice(0, 10000);
+    }
+    if (this.historyRetention === 'off')
+      this.historyStatusText.textContent = _('Browser history is off. Shown events are the live log plus router memory.');
+    if (this.routerHistoryText) {
+      const count = this.routerHistoryStatus && this.routerHistoryStatus.count != null ? this.routerHistoryStatus.count : '—';
+      const cap = this.routerHistoryStatus && this.routerHistoryStatus.cap ? this.routerHistoryStatus.cap : 500;
+      this.routerHistoryText.textContent = _('Router memory: ') + count + _(' of ') + cap + _(' firewall lines · cleared on reboot');
+    }
     this.statusText.textContent = this.paused
       ? _('Auto-refresh paused · manually refreshed at ') + (new Date()).toLocaleTimeString()
       : _('Live · updated ') + (new Date()).toLocaleTimeString();
     this.logStatus.textContent = _('Read ') + this.sourceLineCount + _(' of up to ') + this.logReadLimit +
       _(' most recent source lines · source limit · collected ') + new Date(this.lastCollectedAt).toLocaleString();
     this.renderWatchStatus();
-    if (changed) {
+    if (changed || ringChanged) {
       this.renderRows();
       this.renderInsightsPanel();
       // Draw the log immediately. GeoIP is checked before starting lookups so a missing database
@@ -1003,10 +1159,10 @@ return view.extend({
       this.loadGeoStatus().then(() => {
         if (generation !== this.refreshGeneration) return;
         this.renderGeoStatus();
-        if (changed && this.geoStatus && this.geoStatus.available) this.enrichAndRender();
+        if ((changed || ringChanged) && this.geoStatus && this.geoStatus.available) this.enrichAndRender();
       });
     }
-    else if (changed && this.geoStatus && this.geoStatus.available) this.enrichAndRender();
+    else if ((changed || ringChanged) && this.geoStatus && this.geoStatus.available) this.enrichAndRender();
   },
 
   enrichAndRender: function() {
@@ -1058,7 +1214,7 @@ return view.extend({
     const countryCode = (geo.country_code || '').toUpperCase();
     const country = geo.country_name || 'GeoIP unavailable';
     const asn = geo.asn_organization || '';
-    const kindClass = e.kind === 'Blocked' ? 'blocked' : (e.kind === 'Allowed' ? 'allowed' : (e.kind === 'Exposed' ? 'exposed' : 'observed'));
+    const kindClass = e.kind === 'Blocked' ? 'blocked' : (e.kind === 'Allowed' ? 'allowed' : (e.kind === 'Exposed' ? 'exposed' : (e.kind === 'Other' ? 'other' : 'observed')));
     const policyText = e.policyLabel || e.marker || e.prefix;
     const title = [e.marker || e.prefix, e.policyNote].filter(Boolean).join(' · ');
     return '<tr class="tr fw-' + kindClass + '" data-event-id="' + esc(e.id) + '">' +
@@ -1097,15 +1253,17 @@ return view.extend({
     const matching = this.getMatchingEvents(windowed);
     this.filteredEvents = matching;
     const events = matching.slice(0, this.maxEntries);
-    let blocked = 0, allowed = 0, exposed = 0;
+    let blocked = 0, allowed = 0, exposed = 0, other = 0;
     matching.forEach(e => {
       if (e.kind === 'Blocked') blocked++;
       else if (e.kind === 'Allowed') allowed++;
       else if (e.kind === 'Exposed') exposed++;
+      else if (e.kind === 'Other') other++;
     });
     this.stats.innerHTML = [
       ['MATCHING EVENTS', matching.length],
       ['BLOCKED', blocked],
+      ['OTHER PORTS', other],
       ['EXPOSED SERVICE HITS', exposed],
       ['ALLOWED · EXPLICIT LOGS', allowed]
     ].map(function(item) {
@@ -1116,6 +1274,11 @@ return view.extend({
       '<tr><td colspan="7" class="center">No matching firewall events in the selected window.</td></tr>';
     this.counter.textContent = _('Showing ') + events.length + _(' of ') + matching.length + _(' matching events · ') +
       windowed.length + _(' in selected window · ') + this.events.length + _(' loaded');
+    if (this.insightClear) {
+      const label = insightFilterText(this.sourceFilter, this.portFilter, this.timelineRange);
+      this.insightClear.hidden = !label;
+      this.insightClear.textContent = label ? (_('Clear ') + label) : '';
+    }
     this.loadMoreButton.hidden = events.length >= matching.length;
     this.loadMoreButton.textContent = _('Show ') + PAGE_SIZE + _(' more events · ') + (matching.length - events.length) + _(' remaining');
   },
@@ -1191,8 +1354,9 @@ return view.extend({
       }
       .fw-shell .fw-stat:nth-child(1) strong { color: var(--mp-cyan) !important; }
       .fw-shell .fw-stat:nth-child(2) strong { color: var(--mp-pink) !important; }
-      .fw-shell .fw-stat:nth-child(3) strong { color: var(--mp-cyan) !important; }
-      .fw-shell .fw-stat:nth-child(4) strong { color: var(--mp-green) !important; }
+      .fw-shell .fw-stat:nth-child(3) strong { color: var(--mp-orange) !important; }
+      .fw-shell .fw-stat:nth-child(4) strong { color: var(--mp-cyan) !important; }
+      .fw-shell .fw-stat:nth-child(5) strong { color: var(--mp-green) !important; }
 
       .fw-shell .fw-toolbar {
         display: flex;
@@ -1412,6 +1576,7 @@ return view.extend({
       .fw-shell .fw-table tbody tr:nth-child(even) { background: #29262B !important; }
       .fw-shell .fw-table tbody tr:hover { background: #403B43 !important; }
       .fw-shell .fw-table tbody tr.fw-blocked { box-shadow: inset 3px 0 var(--mp-pink); }
+      .fw-shell .fw-table tbody tr.fw-other { box-shadow: inset 3px 0 var(--mp-orange); }
       .fw-shell .fw-table tbody tr.fw-observed { box-shadow: inset 3px 0 var(--mp-yellow); }
       .fw-shell .fw-table tbody tr.fw-allowed { box-shadow: inset 3px 0 var(--mp-green); }
       .fw-shell .fw-table tbody tr.fw-exposed { box-shadow: inset 3px 0 var(--mp-cyan); }
@@ -1476,6 +1641,11 @@ return view.extend({
         background: var(--mp-yellow) !important;
         border-color: #FFE69A !important;
       }
+      .fw-shell .fw-badge.other {
+        color: #2D2A2E !important;
+        background: var(--mp-orange) !important;
+        border-color: #FFC7A8 !important;
+      }
       .fw-shell .fw-badge.blocked,
       .fw-shell .fw-badge.danger {
         color: #2D2A2E !important;
@@ -1495,7 +1665,7 @@ return view.extend({
         outline-offset: 2px;
       }
       .fw-shell .fw-description { font-size: 15px !important; line-height: 1.6 !important; }
-      .fw-shell .fw-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+      .fw-shell .fw-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
       .fw-shell .fw-stat span { font-size: 13px !important; }
       .fw-shell .fw-stat strong { font-size: 28px !important; }
       .fw-shell .fw-primary-toolbar { align-items: stretch; gap: 10px; margin: 14px 0 8px; }
@@ -1511,9 +1681,13 @@ return view.extend({
       .fw-shell .fw-results-meta .right { color: var(--mp-fg) !important; font-size: 14px !important; }
       .fw-shell .fw-more-actions { margin: 12px 0; border: 1px solid var(--mp-border); border-radius: 8px; background: var(--mp-panel); }
       .fw-shell .fw-more-actions > summary { padding: 12px 14px; cursor: pointer; font-size: 15px; font-weight: 750; }
-      .fw-shell .fw-more-content { display: grid; gap: 10px; padding: 0 14px 14px; }
-      .fw-shell .fw-secondary-toolbar { gap: 8px; }
-      .fw-shell .fw-secondary-toolbar select { min-width: 190px; min-height: 42px; font-size: 14px !important; }
+      .fw-shell .fw-more-content { display: grid; gap: 0; padding: 0 14px 8px; }
+      .fw-shell .fw-settings-section { display: grid; gap: 8px; padding: 14px 0; border-top: 1px solid var(--mp-border); }
+      .fw-shell .fw-settings-section h3 { margin: 0; font-size: 15px; font-weight: 750; }
+      .fw-shell .fw-settings-section p { margin: 0; }
+      .fw-shell .fw-settings-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+      .fw-shell .fw-settings-actions select { min-width: 220px; min-height: 42px; font-size: 14px !important; }
+      .fw-shell .fw-insight-clear[hidden] { display: none !important; }
       .fw-shell .fw-status-row,
       .fw-shell .fw-history-toolbar,
       .fw-shell .fw-privacy { font-size: 14px !important; line-height: 1.5; }
@@ -1551,6 +1725,7 @@ return view.extend({
     this.kind = E('select', {class: 'cbi-input-select', 'aria-label': _('Filter by verdict')}, [
       E('option', {value: 'all'}, _('All verdict types')),
       E('option', {value: 'blocked'}, _('Blocked only')),
+      E('option', {value: 'other'}, _('Other ports')),
       E('option', {value: 'exposed'}, _('Exposed service hits')),
       E('option', {value: 'observed'}, _('Other interface / unclassified')),
       E('option', {value: 'allowed'}, _('Allowed · explicit logs only'))
@@ -1568,7 +1743,7 @@ return view.extend({
       E('option', {value: '6h'}, _('Last 6 hours')),
       E('option', {value: '24h'}, _('Last 24 hours'))
     ]);
-    this.presets = E('select', {class: 'cbi-input-select', title: _('Browser-local saved filter presets'), 'aria-label': _('Saved filter presets')});
+    this.presets = E('select', {class: 'cbi-input-select', title: _('Apply a filter you saved in this browser'), 'aria-label': _('Saved filter presets')});
     this.renderPresetOptions();
     this.counter = E('span', {class: 'right'});
     this.statusText = E('span', {class: 'fw-muted'});
@@ -1576,11 +1751,11 @@ return view.extend({
     this.geoStatusText = E('span', {class: 'fw-muted'});
     this.watchStatusText = E('span', {class: 'fw-muted'});
     this.historyStatusText = E('span', {class: 'fw-muted'});
-    this.historyRetentionSelect = E('select', {class: 'cbi-input-select', 'aria-label': _('Browser-local history retention')}, [
-      E('option', {value: 'off'}, _('Live buffer only')),
-      E('option', {value: '1'}, _('Keep 24 hours locally')),
-      E('option', {value: '7'}, _('Keep 7 days locally')),
-      E('option', {value: '30'}, _('Keep 30 days locally'))
+    this.historyRetentionSelect = E('select', {class: 'cbi-input-select', 'aria-label': _('How long this browser keeps events')}, [
+      E('option', {value: 'off'}, _('Do not keep browser history')),
+      E('option', {value: '1'}, _('Keep 24 hours in this browser')),
+      E('option', {value: '7'}, _('Keep 7 days in this browser')),
+      E('option', {value: '30'}, _('Keep 30 days in this browser'))
     ]);
     this.historyRetentionSelect.value = this.historyRetention;
     this.reputationCheckbox = E('input', {type: 'checkbox', change: ev => {
@@ -1617,46 +1792,82 @@ return view.extend({
       this.tbody
     ]);
 
+    this.deletePresetButton = E('button', {class: 'cbi-button', disabled: !this.presets.value, click: () => this.removeFilterPreset()}, _('Delete saved filter'));
+    this.insightClear = E('button', {class: 'cbi-button fw-insight-clear', hidden: true, click: () => {
+      this.sourceFilter = '';
+      this.portFilter = null;
+      this.timelineRange = null;
+      this.maxEntries = PAGE_SIZE;
+      this.renderRows();
+      this.renderInsightsPanel();
+    }}, '');
+    this.routerHistoryText = E('span', {class: 'fw-muted'});
+    const settingsFile = E('input', {type: 'file', accept: 'application/json,.json', 'aria-label': _('Upload Firewall Log settings file'), change: ev => {
+      const file = ev.target.files && ev.target.files[0];
+      if (file) this.importSettings(file);
+      ev.target.value = '';
+    }});
+    this.settingsFile = settingsFile;
     const advancedActions = E('details', {class: 'fw-more-actions'}, [
-      E('summary', {}, _('More options')),
+      E('summary', {}, _('Settings')),
       E('div', {class: 'fw-more-content'}, [
-        E('div', {class: 'fw-toolbar fw-secondary-toolbar'}, [
-          this.presets,
-          E('button', {class: 'cbi-button', click: () => this.saveFilterPreset()}, _('Save filter')),
-          E('button', {class: 'cbi-button', click: () => this.removeFilterPreset()}, _('Delete saved filter')),
-          E('button', {class: 'cbi-button', click: () => this.exportCSV(true)}, _('Export all loaded')),
-          E('button', {class: 'cbi-button', click: () => this.openTrafficSettings()}, _('WAN / exposed ports')),
-          E('button', {class: 'cbi-button', click: () => this.importFirewallForwards()}, _('Import firewall forwards')),
-          E('button', {class: 'cbi-button', click: () => this.exportSettings()}, _('Export settings')),
-          E('label', {class: 'fw-file-import'}, [E('span', {}, _('Import settings')), this.settingsFile = E('input', {type: 'file', accept: 'application/json,.json', 'aria-label': _('Import Firewall Log settings file'), change: ev => {
-            const file = ev.target.files && ev.target.files[0];
-            if (file) this.importSettings(file);
-            ev.target.value = '';
-          }})]),
-          E('button', {class: 'cbi-button', click: () => {
-            this.sourceFilter = ''; this.portFilter = null; this.timelineRange = null; this.renderRows(); this.renderInsightsPanel();
-          }}, _('Clear insight filters'))
+        E('section', {class: 'fw-settings-section fw-settings-watch'}, [
+          E('h3', {}, _('WAN watch')),
+          E('p', {class: 'fw-muted'}, _('Choose the WAN device and the known ports to log at the full per-address budget. Every other WAN port is sampled at 2 lines per minute per address. Forwarded ports use a smaller budget. The watch never accepts or drops traffic.')),
+          E('div', {class: 'fw-settings-actions'}, [
+            E('button', {class: 'cbi-button cbi-button-action', click: () => this.openTrafficSettings()}, _('Edit WAN watch'))
+          ]),
+          this.watchStatusText
         ]),
-        E('div', {class: 'fw-toolbar fw-history-toolbar'}, [
-          E('label', {class: 'fw-history-control'}, [E('span', {}, _('Browser-local history')), this.historyRetentionSelect]),
-          E('button', {class: 'cbi-button', click: () => this.clearLocalHistory().catch(e => ui.addNotification(null, E('p', e.message), 'error'))}, _('Clear local history')),
-          E('span', {class: 'fw-muted'}, _('Stored in this browser only · max 10,000 events'))
+        E('section', {class: 'fw-settings-section fw-settings-labels'}, [
+          E('h3', {}, _('Exposed service labels')),
+          E('p', {class: 'fw-muted'}, _('A label renames a watch hit on that port from Blocked to Exposed. Labels stay in this browser. Copying them from port forwards does not change the firewall.')),
+          E('div', {class: 'fw-settings-actions'}, [
+            E('button', {class: 'cbi-button', click: () => this.importFirewallForwards()}, _('Copy labels from port forwards'))
+          ])
         ]),
-        E('div', {class: 'fw-status-row'}, [this.logStatus, this.watchStatusText, this.geoStatusText, this.historyStatusText]),
-        this.reputationToggle
+        E('section', {class: 'fw-settings-section fw-settings-history'}, [
+          E('h3', {}, _('History')),
+          E('p', {class: 'fw-muted'}, _('Browser history stays on this computer, up to 10,000 events. Router history is a memory ring of firewall lines on this router. It is cleared on reboot, and it keeps those lines when other syslog would push them out of the live buffer.')),
+          E('div', {class: 'fw-settings-actions'}, [
+            E('label', {class: 'fw-history-control'}, [E('span', {}, _('This browser')), this.historyRetentionSelect]),
+            E('button', {class: 'cbi-button', click: () => this.clearLocalHistory().catch(e => ui.addNotification(null, E('p', e.message), 'error'))}, _('Clear browser history')),
+            E('button', {class: 'cbi-button', click: () => this.clearRouterHistory().catch(e => ui.addNotification(null, E('p', e.message), 'error'))}, _('Clear router history'))
+          ]),
+          this.historyStatusText,
+          this.routerHistoryText
+        ]),
+        E('section', {class: 'fw-settings-section fw-settings-files'}, [
+          E('h3', {}, _('Files')),
+          E('p', {class: 'fw-muted'}, _('Export downloads the events currently in memory. A settings file carries labels, saved filters, and the WAN watch. Uploading a file that includes the watch writes it to this router.')),
+          E('div', {class: 'fw-settings-actions'}, [
+            E('button', {class: 'cbi-button', click: () => this.exportCSV(true)}, _('Export all loaded events')),
+            E('button', {class: 'cbi-button', click: () => this.exportSettings()}, _('Download settings')),
+            E('label', {class: 'fw-file-import'}, [E('span', {}, _('Upload settings')), settingsFile])
+          ]),
+          this.logStatus,
+          this.geoStatusText
+        ]),
+        E('section', {class: 'fw-settings-section fw-settings-privacy'}, [
+          E('h3', {}, _('External lookup')),
+          this.reputationToggle
+        ])
       ])
     ]);
 
     const result = E('div', {class: 'fw-shell'}, [
-      E('p', {class: 'cbi-section-descr fw-description'}, _('Each row is one firewall event. WAN watchlist hits are Blocked unless the destination has an exposed-service label. Allowed requires an explicit ALLOW/ACCEPT log. GeoIP lookups stay local.')),
+      E('p', {class: 'cbi-section-descr fw-description'}, _('Each row is one firewall event. A known-port probe is Blocked when nothing allows or forwards it. Other is a low-rate sample of a port outside that list. Allowed requires an explicit ALLOW/ACCEPT log. GeoIP lookups stay local.')),
       this.stats,
       E('div', {class: 'fw-toolbar fw-primary-toolbar'}, [
         this.search, this.kind, this.proto, this.window,
+        this.presets,
+        E('button', {class: 'cbi-button', click: () => this.saveFilterPreset()}, _('Save filter')),
+        this.deletePresetButton,
         E('button', {class: 'cbi-button cbi-button-action', click: () => this.refreshEvents().catch(e => ui.addNotification(null, E('p', e.message), 'error'))}, _('Refresh')),
         this.pauseButton,
         E('button', {class: 'cbi-button cbi-button-action fw-export-button', click: () => this.exportCSV(false)}, _('Export filtered CSV'))
       ]),
-      E('div', {class: 'fw-results-meta'}, [this.counter, this.statusText]),
+      E('div', {class: 'fw-results-meta'}, [this.counter, this.statusText, this.insightClear]),
       this.insightsDisclosure,
       E('div', {class: 'fw-tablewrap'}, table),
       this.loadMoreButton,
@@ -1728,7 +1939,10 @@ return view.extend({
       this.renderRows();
       this.renderInsightsPanel();
     });
-    this.presets.addEventListener('change', () => this.applyFilterPreset(this.presets.value));
+    this.presets.addEventListener('change', () => {
+      this.deletePresetButton.disabled = !this.presets.value;
+      this.applyFilterPreset(this.presets.value);
+    });
     this.historyRetentionSelect.addEventListener('change', () => {
       const wasDisabled = this.historyRetention === 'off';
       this.historyRetention = this.historyRetentionSelect.value;

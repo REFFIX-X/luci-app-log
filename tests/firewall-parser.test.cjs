@@ -35,6 +35,14 @@ test('classifies infrastructure WAN watchlist hits as blocked', () => {
   assert.equal(event.prefix, 'INFRA_PORT_HIT');
 });
 
+test('classifies a port outside the watch list as its own verdict', () => {
+  const event = parser('Oct 12 12:00:05 2026 router kernel: INFRA_PORT_OTHER: IN=wan SRC=203.0.113.10 DST=192.0.2.1 PROTO=TCP DPT=25125 SYN', 6);
+  assert.equal(event.kind, 'Other');
+  assert.equal(event.prefix, 'INFRA_PORT_OTHER');
+  assert.equal(event.dport, 25125);
+  assert.equal(event.service, 'Unknown service');
+});
+
 test('classifies only explicit allow markers as allowed', () => {
   const event = parser('Oct 12 12:00:02 2026 router kernel: FIREWALL_ALLOW: IN=wan SRC=203.0.113.9 DST=192.0.2.1 PROTO=TCP SPT=4567 DPT=443', 3);
   assert.equal(event.kind, 'Allowed');

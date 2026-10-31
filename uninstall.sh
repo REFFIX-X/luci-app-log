@@ -3,8 +3,11 @@
 set -eu
 /etc/init.d/infra-port-watch disable 2>/dev/null || true
 /etc/init.d/infra-port-watch stop 2>/dev/null || true
-rm -f /usr/sbin/infra-port-watch /usr/sbin/infra-port-watch-config
-rm -f /etc/infra-port-watch.sh /etc/init.d/infra-port-watch
+/etc/init.d/log-viewer-history disable 2>/dev/null || true
+/etc/init.d/log-viewer-history stop 2>/dev/null || true
+rm -f /usr/sbin/infra-port-watch /usr/sbin/infra-port-watch-config /usr/sbin/log-viewer-history
+rm -f /etc/infra-port-watch.sh /etc/init.d/infra-port-watch /etc/init.d/log-viewer-history
+rm -rf /tmp/log-viewer
 rm -f /etc/hotplug.d/iface/99-infra-port-watch
 rm -f /www/luci-static/resources/view/log-viewer/firewall.js
 rm -rf /www/luci-static/resources/log-viewer/flags

@@ -26,8 +26,13 @@
     },
     {
       "marker": "INFRA_PORT_HIT",
-      "label": "Infrastructure watchlist",
-      "note": "WAN watchlist hit. Default-deny blocks this port unless an allow rule or port forward applies."
+      "label": "Default deny",
+      "note": "No allow or forward for this port. The watch logged the probe; the firewall default policy drops it."
+    },
+    {
+      "marker": "INFRA_PORT_OTHER",
+      "label": "Not on the watch list",
+      "note": "Low-rate sample of a port outside the watch list. Default policy drops it unless an allow or forward applies."
     }
   ]
 }
