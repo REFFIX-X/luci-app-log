@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.3.0 (2026-10-31)
+
+- Depend on `iptables-mod-hashlimit` so each source address gets its own WAN log budget. If the match still cannot be loaded, the watch falls back to one shared limit and the status line says so.
+- Add **Add missing default ports** in the WAN editor. It appends shipped defaults that are not already in the list and leaves saved ports in place. Save settings to apply the change.
+- Add **Update GeoIP databases** under Settings → Files. It runs `/usr/bin/flint4-geoip-update` on the router and refreshes the database age.
+
 ## v3.2.1 (2026-10-31)
 
 - Drop the Firewall Log type one step: table and fields are 13px, buttons are 13px, and the summary numbers are 22px. Column titles stay pinned while the log scrolls.
