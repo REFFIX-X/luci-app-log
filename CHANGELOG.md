@@ -1,5 +1,9 @@
 # Changelog
 
+## v3.3.1 (2026-10-31)
+
+- Running the installer again upgrades an older `luci-app-log-viewer` and replaces the same release. A newer installed copy is left alone. The saved `/etc/config/infra-port-watch` stays.
+
 ## v3.3.0 (2026-10-31)
 
 - Depend on `iptables-mod-hashlimit` so each source address gets its own WAN log budget. If the match still cannot be loaded, the watch falls back to one shared limit and the status line says so.
