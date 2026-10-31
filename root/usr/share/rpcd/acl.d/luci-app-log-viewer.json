@@ -30,7 +30,13 @@
         "/usr/sbin/infra-port-watch get": [
           "exec"
         ],
+        "/usr/sbin/log-viewer-history": [
+          "exec"
+        ],
         "/etc/log-viewer/policies.json": [
+          "read"
+        ],
+        "/tmp/log-viewer/events.ring": [
           "read"
         ]
       }
@@ -43,6 +49,9 @@
       },
       "file": {
         "/usr/sbin/infra-port-watch-config": [
+          "exec"
+        ],
+        "/usr/sbin/log-viewer-history": [
           "exec"
         ]
       }

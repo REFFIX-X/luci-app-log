@@ -20,11 +20,19 @@ test('ships the Flint4 default watchlist in UCI and the runtime fallback consist
 });
 
 test('watcher only logs TCP SYN and UDP matches, then returns traffic to normal firewall processing', () => {
-  assert.match(watcher, /-p tcp .*--syn -j "\$LOG_CHAIN"/);
-  assert.match(watcher, /-p udp .* -j "\$LOG_CHAIN"/);
+  assert.match(watcher, /-p tcp .*--syn -j "\$chain"/);
+  assert.match(watcher, /-p udp .* -j "\$chain"/);
   assert.match(watcher, /-j LOG --log-prefix 'INFRA_PORT_HIT: '/);
   assert.match(watcher, /-j RETURN/);
-  assert.match(watcher, /--limit 10\/minute --limit-burst 20/);
+  assert.match(watcher, /--hashlimit-mode srcip/);
+  assert.match(watcher, /--hashlimit-upto "\$rate"/);
+  assert.match(watcher, /--hashlimit-burst "\$burst"/);
+  assert.match(watcher, /install_log_chain "\$LOG_CHAIN" reffix_scan 30\/minute 15/);
+  assert.match(watcher, /install_log_chain "\$FWD_CHAIN" reffix_fwd 4\/minute 4/);
+  assert.match(watcher, /--hashlimit-htable-expire 120000/);
+  assert.match(watcher, /INFRA_PORT_FWD/);
+  assert.match(watcher, /src_dport/);
+  assert.doesNotMatch(watcher, /--limit 10\/minute --limit-burst 20/);
   assert.doesNotMatch(watcher, /\-j (?:ACCEPT|DROP|REJECT)\b/);
   assert.match(watcher, /if \[ "\$count" -ge 15 \]/, 'multiport groups stay within the xt_multiport limit');
 });

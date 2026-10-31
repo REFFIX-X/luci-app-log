@@ -1,8 +1,45 @@
 #!/bin/sh
 # Local MaxMind GeoLite2 lookup and database status. Requires libmaxminddb (mmdblookup).
-set -e
+set -eu
 country_db="${GEOIP_DB_DIR:-/usr/share/GeoIP}/GeoLite2-Country.mmdb"
 asn_db="${GEOIP_DB_DIR:-/usr/share/GeoIP}/GeoLite2-ASN.mmdb"
+
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\r\n'
+}
+
+lookup_ip() {
+  ip="$1"
+  cc=""
+  country=""
+  asn=""
+  if [ -s "$country_db" ] && command -v mmdblookup >/dev/null 2>&1; then
+    dump="$(mmdblookup --file "$country_db" --ip "$ip" country 2>/dev/null || true)"
+    cc="$(printf '%s\n' "$dump" | sed -n '/iso_code/,+2s/.*"\([A-Z][A-Z]\)".*/\1/p' | head -n1)"
+    country="$(printf '%s\n' "$dump" | awk '
+      /"en"/ { grab=1; next }
+      grab && /"/ {
+        if (match($0, /"[^"]+"/)) { print substr($0, RSTART+1, RLENGTH-2); exit }
+      }
+    ')"
+  fi
+  if [ -s "$asn_db" ] && command -v mmdblookup >/dev/null 2>&1; then
+    asn="$(mmdblookup --file "$asn_db" --ip "$ip" autonomous_system_organization 2>/dev/null | sed -n 's/.*"\(.*\)".*/\1/p' | head -n1 || true)"
+  fi
+}
+
+emit_lookup() {
+  ip="$1"
+  case "$ip" in
+    ''|*[!0-9.]*|*.*.*.*.*)
+      printf '{"error":"invalid IP"}'
+      return 0
+      ;;
+  esac
+  lookup_ip "$ip"
+  printf '{"country_code":"%s","country_name":"%s","asn_organization":"%s"}' \
+    "$(json_escape "$cc")" "$(json_escape "$country")" "$(json_escape "$asn")"
+}
 
 if [ "$#" -eq 1 ] && [ "$1" = "--status" ]; then
   available=false
@@ -27,27 +64,24 @@ if [ "$#" -eq 1 ] && [ "$1" = "--status" ]; then
   exit 0
 fi
 
+if [ "$#" -ge 1 ] && [ "$1" = "--batch" ]; then
+  shift
+  printf '{'
+  first=1
+  for ip in "$@"; do
+    if [ "$first" -eq 1 ]; then first=0; else printf ','; fi
+    printf '"%s":' "$(json_escape "$ip")"
+    emit_lookup "$ip"
+  done
+  printf '}\n'
+  exit 0
+fi
+
 if [ "$#" -ne 2 ] || [ "$1" != "--json" ]; then
-  echo '{"error":"usage: flint4-geoip --json IP"}'
+  echo '{"error":"usage: flint4-geoip --json IP | --batch IP [IP...] | --status"}'
   exit 2
 fi
 ip="$2"
 case "$ip" in *[!0-9a-fA-F:.]*) echo '{"error":"invalid IP"}'; exit 2;; esac
-
-cc=""
-country=""
-asn=""
-
-if [ -s "$country_db" ] && command -v mmdblookup >/dev/null 2>&1; then
-  cc="$(mmdblookup --file "$country_db" --ip "$ip" country iso_code 2>/dev/null | sed -n 's/.*"\([A-Z][A-Z]\)".*/\1/p' | head -n1 || true)"
-  country="$(mmdblookup --file "$country_db" --ip "$ip" country names en 2>/dev/null | sed -n 's/.*"\(.*\)".*/\1/p' | head -n1 || true)"
-fi
-if [ -s "$asn_db" ] && command -v mmdblookup >/dev/null 2>&1; then
-  asn="$(mmdblookup --file "$asn_db" --ip "$ip" autonomous_system_organization 2>/dev/null | sed -n 's/.*"\(.*\)".*/\1/p' | head -n1 || true)"
-fi
-
-json_escape() {
-  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\r\n'
-}
-printf '{"country_code":"%s","country_name":"%s","asn_organization":"%s"}\n' \
-  "$(json_escape "$cc")" "$(json_escape "$country")" "$(json_escape "$asn")"
+emit_lookup "$ip"
+printf '\n'

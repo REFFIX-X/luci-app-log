@@ -1,0 +1,12 @@
+#!/bin/sh /etc/rc.common
+
+START=97
+STOP=10
+USE_PROCD=1
+
+start_service() {
+	procd_open_instance
+	procd_set_param command /usr/sbin/log-viewer-history follow
+	procd_set_param respawn
+	procd_close_instance
+}
